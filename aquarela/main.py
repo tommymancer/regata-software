@@ -474,12 +474,20 @@ async def _pipeline_loop(source: NmeaSource) -> None:
         for _st, _pl in polar_learners.items():
             _pl.flush()
         if config.source not in ("simulator", "interactive"):
-            _active_learner = polar_learners[config.sail_config_key()]
-            learned = _active_learner.rebuild()
-            if learned is not None:
-                logger.info("Learned polar rebuilt for %s (%d bins ready)",
-                            config.sail_config_key(),
-                            _active_learner.get_stats().get("bins_ready", 0))
+            _key = config.sail_config_key()
+            _active_learner = polar_learners[_key]
+            try:
+                _learned = _active_learner.rebuild()
+                if _learned is not None:
+                    polar_manager.set_polar(_key, _learned)
+                    polar = polar_manager.active_polar
+                    logger.info(
+                        "Auto-activated learned polar for %s (%d bins ready)",
+                        _key,
+                        _active_learner.get_stats().get("bins_ready", 0),
+                    )
+            except Exception:
+                logger.exception("Final rebuild failed for %s", _key)
         try:
             await source.stop()
         except Exception:
