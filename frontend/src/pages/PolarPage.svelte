@@ -13,6 +13,7 @@
   let sessions = [];
   let showSnapshots = false;
   let showSessions = false;
+  let showManual = false;
   let loading = false;
   let feedback = "";
 
@@ -33,7 +34,7 @@
     "",
     "Naviga per raccogliere dati",
     `${stats?.total_samples ?? 0} campioni — continua per riempire le caselle`,
-    `${stats?.bins_ready ?? 0} caselle pronte — puoi fare REBUILD`,
+    `${stats?.bins_ready ?? 0} caselle pronte — rebuild automatico a fine sessione`,
     `Polar appresa attiva — ${stats?.coverage_pct ?? 0}% copertura`,
   ][step] || "";
 
@@ -171,7 +172,7 @@
     <div class="step-labels">
       <span class:dim={step !== 1}>NAVIGA</span>
       <span class:dim={step !== 2}>RACCOGLI</span>
-      <span class:dim={step !== 3}>RICOSTRUISCI</span>
+      <span class:dim={step !== 3}>ELABORA</span>
       <span class:dim={step !== 4}>ATTIVA</span>
     </div>
     <div class="step-text">{stepText}</div>
@@ -198,6 +199,14 @@
         </span>
         <span class="stat-label">polar</span>
       </div>
+    </div>
+  {/if}
+
+  {#if stats?.last_rebuild}
+    <div class="last-rebuild">
+      Ultimo rebuild: {new Date(stats.last_rebuild).toLocaleString("it-IT", {
+        day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
+      })}
     </div>
   {/if}
 
@@ -240,28 +249,35 @@
     </div>
   {/if}
 
-  <!-- Action buttons -->
-  <div class="actions">
-    <button class="btn btn-primary" on:click={() => apiAction("rebuild")}
-      disabled={loading || !stats || stats.bins_ready === 0}
-      title="Ricostruisci la polar dai dati raccolti">
-      REBUILD
-    </button>
-    <button class="btn btn-accent" on:click={() => apiAction("activate")}
-      disabled={loading || !stats || !stats.has_learned_polar}
-      title="Usa la polar appresa per target e performance">
-      ATTIVA
-    </button>
-    <button class="btn btn-secondary" on:click={() => apiAction("reset-to-base")}
-      disabled={loading}>
-      POLAR BASE
-    </button>
-    <button class="btn btn-danger"
-      on:click={() => apiAction("clear", "Cancellare tutti i campioni raccolti?")}
-      disabled={loading}>
-      CANCELLA
-    </button>
-  </div>
+  <!-- Manual controls (collapsible) -->
+  <button class="btn btn-secondary manual-toggle"
+    on:click={() => showManual = !showManual}>
+    {showManual ? "NASCONDI MANUALE" : "CONTROLLI MANUALI"}
+  </button>
+
+  {#if showManual}
+    <div class="actions">
+      <button class="btn btn-primary" on:click={() => apiAction("rebuild")}
+        disabled={loading || !stats || stats.bins_ready === 0}
+        title="Ricostruisci la polar dai dati raccolti">
+        REBUILD
+      </button>
+      <button class="btn btn-accent" on:click={() => apiAction("activate")}
+        disabled={loading || !stats || !stats.has_learned_polar}
+        title="Usa la polar appresa per target e performance">
+        ATTIVA
+      </button>
+      <button class="btn btn-secondary" on:click={() => apiAction("reset-to-base")}
+        disabled={loading}>
+        POLAR BASE
+      </button>
+      <button class="btn btn-danger"
+        on:click={() => apiAction("clear", "Cancellare tutti i campioni raccolti?")}
+        disabled={loading}>
+        CANCELLA
+      </button>
+    </div>
+  {/if}
 
   {#if feedback}
     <div class="feedback" class:error={feedbackError}>{feedback}</div>
@@ -538,6 +554,16 @@
     color: var(--text-dim);
     font-size: 11px;
     opacity: 0.7;
+  }
+
+  .last-rebuild {
+    text-align: center;
+    font-size: var(--label-xs-size);
+    color: var(--text-dim);
+    letter-spacing: 0.05em;
+  }
+  .manual-toggle {
+    width: 100%;
   }
 
   /* ── Actions ─────────────────────────────────── */
