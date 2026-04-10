@@ -95,6 +95,25 @@
     return diff;
   }
 
+  function cellDiffRaw(tws, twa) {
+    if (!data?.has_learned) return null;
+    const learned = data.learned_curves?.[tws];
+    const base = data.base_curves?.[tws];
+    if (!learned || !base) return null;
+    const lPt = learned.find(p => p.twa === twa);
+    const bPt = base.find(p => p.twa === twa);
+    if (!lPt || !bPt) return null;
+    return lPt.bsp - bPt.bsp;
+  }
+
+  function diffBgColor(diff) {
+    if (diff == null) return "transparent";
+    const alpha = Math.min(0.5, Math.max(0.1, Math.abs(diff) / 0.5));
+    return diff > 0
+      ? `rgba(0, 230, 118, ${alpha})`
+      : `rgba(255, 23, 68, ${alpha})`;
+  }
+
   async function fetchData() {
     try {
       const res = await fetch("/api/polar/diagram");
@@ -125,6 +144,8 @@
     {#if data?.has_learned}
       <button class="toggle-btn" class:active={showMode === "learned"}
         on:click={() => showMode = "learned"}>APPRESA</button>
+      <button class="toggle-btn" class:active={showMode === "diff"}
+        on:click={() => showMode = "diff"}>DIFF</button>
     {/if}
     {#if liveTws != null}
       <span class="live-wind">TWS {liveTws.toFixed(0)} kt</span>
@@ -168,21 +189,33 @@
             <tr class:highlight-row={twa === closestTwa}>
               <td class="row-header">{twa}°</td>
               {#each twsValues as tws}
-                {@const bsp = lookup[tws]?.[twa]}
-                {@const diff = cellDiff(tws, twa)}
-                <td class:highlight-cell={tws === closestTws && twa === closestTwa}
-                    class:has-diff={diff != null}>
-                  {#if bsp != null}
-                    <span class="bsp-val">{bsp.toFixed(1)}</span>
-                    {#if diff != null}
-                      <span class="diff-val" class:positive={diff > 0} class:negative={diff < 0}>
-                        {diff > 0 ? "+" : ""}{diff.toFixed(1)}
-                      </span>
+                {#if showMode === "diff"}
+                  {@const rawDiff = cellDiffRaw(tws, twa)}
+                  <td class:highlight-cell={tws === closestTws && twa === closestTwa}
+                      style="background: {diffBgColor(rawDiff)}">
+                    {#if rawDiff != null}
+                      <span class="diff-only">{rawDiff > 0 ? "+" : ""}{rawDiff.toFixed(1)}</span>
+                    {:else}
+                      <span class="empty">---</span>
                     {/if}
-                  {:else}
-                    <span class="empty">—</span>
-                  {/if}
-                </td>
+                  </td>
+                {:else}
+                  {@const bsp = lookup[tws]?.[twa]}
+                  {@const diff = cellDiff(tws, twa)}
+                  <td class:highlight-cell={tws === closestTws && twa === closestTwa}
+                      class:has-diff={diff != null}>
+                    {#if bsp != null}
+                      <span class="bsp-val">{bsp.toFixed(1)}</span>
+                      {#if diff != null}
+                        <span class="diff-val" class:positive={diff > 0} class:negative={diff < 0}>
+                          {diff > 0 ? "+" : ""}{diff.toFixed(1)}
+                        </span>
+                      {/if}
+                    {:else}
+                      <span class="empty">—</span>
+                    {/if}
+                  </td>
+                {/if}
               {/each}
             </tr>
           {/each}
@@ -357,6 +390,13 @@
     line-height: 1.2;
   }
   .empty { color: var(--border); }
+
+  .diff-only {
+    font-family: "SF Mono", "Menlo", monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+  }
 
   .empty-state {
     flex: 1;
