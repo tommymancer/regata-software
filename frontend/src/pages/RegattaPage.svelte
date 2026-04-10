@@ -120,8 +120,8 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    padding: 4px 6px;
-    gap: 6px;
+    padding: var(--pad-compact) var(--gap-compact);
+    gap: var(--gap-compact);
   }
 
   /* ── 0. Wind Shift Indicator ─────────────────────────── */
@@ -152,7 +152,7 @@
   /* ── 2. KPI Boxes  (part of ~40% with status-row) ──── */
   .kpi-row {
     display: flex;
-    gap: 6px;
+    gap: var(--gap-compact);
     width: 100%;
     flex: 2.4;
     min-height: 0;
@@ -168,15 +168,15 @@
     background: linear-gradient(180deg, var(--card-glow, var(--card)) 0%, var(--card) 100%);
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 4px 2px;
+    padding: var(--pad-compact) 2px;
     overflow: hidden;
   }
 
   .kpi-label {
-    font-size: 11px;
-    font-weight: 600;
+    font-size: var(--label-sm-size);
+    font-weight: var(--label-sm-weight);
     color: var(--text-dim);
-    letter-spacing: 0.1em;
+    letter-spacing: var(--label-sm-spacing);
     margin-bottom: 2px;
   }
 
@@ -208,7 +208,7 @@
   /* ── 3. TWS + Traffic Light (part of ~40% with KPIs) ─ */
   .status-row {
     display: flex;
-    gap: 6px;
+    gap: var(--gap-compact);
     width: 100%;
     flex: 1.6;
     min-height: 0;
@@ -227,10 +227,10 @@
   }
 
   .tws-label {
-    font-size: 11px;
+    font-size: var(--label-sm-size);
     font-weight: 600;
     color: var(--text-dim);
-    letter-spacing: 0.1em;
+    letter-spacing: var(--label-sm-spacing);
   }
 
   .tws-value {
@@ -292,10 +292,10 @@
   }
 
   .light-label {
-    font-size: 10px;
-    font-weight: 700;
+    font-size: var(--label-xs-size);
+    font-weight: var(--label-xs-weight);
     color: var(--text-dim);
-    letter-spacing: 0.08em;
+    letter-spacing: var(--label-xs-spacing);
     text-align: center;
   }
 
