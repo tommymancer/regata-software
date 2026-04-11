@@ -86,11 +86,11 @@ class TestCsvLogger:
         with open(path) as f:
             lines = f.readlines()
         row = lines[1]
-        # Should have 17 commas (18 columns) and mostly empty
-        assert row.count(",") == 17  # 18 columns = 17 commas
+        # Should have 41 commas (42 columns) and mostly empty
+        assert row.count(",") == 41  # 42 columns = 41 commas
 
     def test_csv_column_count(self, tmp_dir):
-        """Each row should have exactly 18 columns."""
+        """Each row should have exactly 42 columns (18 Njord + 24 extended)."""
         logger = CsvLogger(output_dir=tmp_dir, csv_rate_hz=10, pipeline_hz=10)
         path = logger.start_session()
 
@@ -104,7 +104,7 @@ class TestCsvLogger:
         with open(path) as f:
             for line in f:
                 parts = line.strip().split(",")
-                assert len(parts) == 18
+                assert len(parts) == 42
 
     def test_stop_without_start(self, tmp_dir):
         """Stopping when not started should be safe."""

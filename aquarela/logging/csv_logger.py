@@ -1,11 +1,17 @@
 """Njord Analytics-compatible CSV logger.
 
-Writes the exact 18-column header from the Aquarela Njord CSV Spec at 2 Hz
-(decimated from the 10 Hz pipeline).  Each sailing session gets its own file
-under data/sessions/.
+Writes session data at 2 Hz (decimated from the 10 Hz pipeline).
+The first 18 columns are the Njord-compatible base format.
+Additional columns follow for richer analysis without breaking Njord import.
 
-CSV format:
+CSV format (Njord base):
   Timestamp,Lat,Lon,SOG,COG,Heading,BSP,AWA,AWS,TWA,TWS,TWD,Heel,Trim,Depth,MagneticVariation,Perf,BRG
+Extended columns:
+  VMG,VMC,Leeway,WaterTemp,TargetTWA,TargetBSP,TargetVMG,VMGPerf,
+  AWACorrected,AWSCorrected,UpwashOffset,HeelCorrection,
+  SailConfig,CourseOffset,LineBias,DistToLine,
+  LaylinePort,LaylineStbd,DistPortLayline,DistStbdLayline,
+  DTW,RaceState,RaceTimer,GPSSats
 """
 
 import os
@@ -18,7 +24,12 @@ from ..pipeline.state import BoatState
 
 CSV_HEADER = (
     "Timestamp,Lat,Lon,SOG,COG,Heading,BSP,AWA,AWS,"
-    "TWA,TWS,TWD,Heel,Trim,Depth,MagneticVariation,Perf,BRG\n"
+    "TWA,TWS,TWD,Heel,Trim,Depth,MagneticVariation,Perf,BRG,"
+    "VMG,VMC,Leeway,WaterTemp,TargetTWA,TargetBSP,TargetVMG,VMGPerf,"
+    "AWACorrected,AWSCorrected,UpwashOffset,HeelCorrection,"
+    "SailConfig,CourseOffset,LineBias,DistToLine,"
+    "LaylinePort,LaylineStbd,DistPortLayline,DistStbdLayline,"
+    "DTW,RaceState,RaceTimer,GPSSats\n"
 )
 
 
@@ -27,6 +38,11 @@ def _fmt(value: Optional[float], decimals: int = 2) -> str:
     if value is None:
         return ""
     return f"{value:.{decimals}f}"
+
+
+def _fmt_str(value: Optional[str]) -> str:
+    """Format a string for CSV output, or empty string if None."""
+    return value or ""
 
 
 class CsvLogger:
@@ -108,6 +124,7 @@ class CsvLogger:
         ts = state.timestamp.strftime("%Y-%m-%dT%H:%M:%S.") + \
              f"{state.timestamp.microsecond // 1000:03d}Z"
 
+        # Njord-compatible base (18 columns)
         row = (
             f"{ts},"
             f"{_fmt(state.lat, 7)},"
@@ -126,7 +143,32 @@ class CsvLogger:
             f"{_fmt(state.depth_m)},"
             f"{_fmt(state.magnetic_variation, 1)},"
             f"{_fmt(state.perf_pct, 1)},"
-            f"{_fmt(state.btw_deg, 1)}\n"
+            f"{_fmt(state.btw_deg, 1)},"
+            # Extended columns
+            f"{_fmt(state.vmg_kt)},"
+            f"{_fmt(state.vmc_kt)},"
+            f"{_fmt(state.leeway_deg, 1)},"
+            f"{_fmt(state.water_temp_c, 1)},"
+            f"{_fmt(state.target_twa_deg, 1)},"
+            f"{_fmt(state.target_bsp_kt)},"
+            f"{_fmt(state.target_vmg_kt)},"
+            f"{_fmt(state.vmg_perf_pct, 1)},"
+            f"{_fmt(state.awa_corrected_deg, 1)},"
+            f"{_fmt(state.aws_corrected_kt)},"
+            f"{_fmt(state.upwash_offset_deg, 2)},"
+            f"{_fmt(state.heel_correction_deg, 2)},"
+            f"{_fmt_str(state.active_sail_config)},"
+            f"{_fmt(state.course_offset_deg, 1)},"
+            f"{_fmt(state.line_bias_deg, 1)},"
+            f"{_fmt(state.dist_to_line_nm, 4)},"
+            f"{_fmt(state.layline_port_deg, 1)},"
+            f"{_fmt(state.layline_stbd_deg, 1)},"
+            f"{_fmt(state.dist_to_port_layline_nm, 3)},"
+            f"{_fmt(state.dist_to_stbd_layline_nm, 3)},"
+            f"{_fmt(state.dtw_nm, 3)},"
+            f"{_fmt_str(state.race_state)},"
+            f"{_fmt(state.race_timer_secs, 0)},"
+            f"{_fmt(state.gps_num_sats, 0)}\n"
         )
 
         self._file.write(row)
