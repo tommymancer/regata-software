@@ -1,8 +1,11 @@
-"""CAN bus NMEA 2000 writer — publishes corrected wind as PGN 130306.
+"""CAN bus NMEA 2000 writer — publishes calibrated data as NMEA 2000 PGNs.
 
-Sends true wind (water-referenced and ground-referenced) onto the NMEA 2000
-bus so that downstream instruments (displays, autopilot) can use the
-upwash-corrected values.  Uses python-can with SocketCAN.
+Sends calibrated sensor values onto the NMEA 2000 CAN bus so that
+downstream instruments (displays, autopilot) use corrected data:
+  - PGN 130306: True wind (upwash-corrected)
+  - PGN 127250: Vessel heading (compass offset applied)
+  - PGN 128259: Boat speed (speed factor applied)
+  - PGN 128267: Water depth (depth offset applied)
 
 The ``import can`` is deferred to method bodies so the module can be
 imported on development machines where python-can is not installed.
@@ -49,6 +52,56 @@ def encode_pgn_130306(twa_deg: float, tws_kt: float, reference: int) -> bytes:
     sid = 0
     return struct.pack("<BHHBbb", sid, speed_raw, angle_raw, reference,
                        -1, -1)  # bytes 6-7 = 0xFF (reserved)
+
+
+# ── PGN 127250  Vessel Heading ───────────────────────────────────────────
+
+def encode_pgn_127250(heading_deg: float, magnetic: bool = True) -> bytes:
+    """Encode PGN 127250 (Vessel Heading) as an 8-byte CAN frame.
+
+    Byte layout:
+      0:     SID
+      1-2:   Heading (unsigned 16-bit, 0.0001 rad units)
+      3-4:   Deviation (0xFFFF = not available)
+      5-6:   Variation (0xFFFF = not available)
+      7:     Reference (bits 0-1: 0=true, 1=magnetic)
+    """
+    angle_rad = radians(heading_deg % 360.0)
+    angle_raw = int(round(angle_rad * 10000))
+    ref = 1 if magnetic else 0
+    return struct.pack("<BHHHb", 0, angle_raw, 0xFFFF, 0xFFFF, ref)
+
+
+# ── PGN 128259  Speed, Water Referenced ─────────────────────────────────
+
+def encode_pgn_128259(speed_kt: float) -> bytes:
+    """Encode PGN 128259 (Speed, Water Referenced) as an 8-byte CAN frame.
+
+    Byte layout:
+      0:     SID
+      1-2:   Speed water referenced (unsigned 16-bit, 0.01 m/s units)
+      3-4:   Speed ground referenced (0xFFFF = not available)
+      5:     Speed water ref type (0 = paddle wheel, 1 = pitot, etc.)
+      6-7:   Reserved (0xFF)
+    """
+    speed_ms = speed_kt * _KT_TO_MS
+    speed_raw = int(round(speed_ms * 100))
+    return struct.pack("<BHHB", 0, speed_raw, 0xFFFF, 0) + b"\xff\xff"
+
+
+# ── PGN 128267  Water Depth ─────────────────────────────────────────────
+
+def encode_pgn_128267(depth_m: float) -> bytes:
+    """Encode PGN 128267 (Water Depth) as an 8-byte CAN frame.
+
+    Byte layout:
+      0:     SID
+      1-4:   Depth (unsigned 32-bit, 0.01 m units)
+      5-6:   Offset (signed 16-bit, 0.001 m — set to 0)
+      7:     Max range (0xFF = not available)
+    """
+    depth_raw = int(round(depth_m * 100))
+    return struct.pack("<BIhb", 0, depth_raw, 0, -1)
 
 
 # ── ISO 11783 NAME field (PGN 60928) ─────────────────────────────────────
@@ -252,7 +305,7 @@ class CanWriter:
         """
         import can
 
-        model_id = b"Aquarela Wind" + b"\xff" * 19       # 32 bytes
+        model_id = b"Aquarela Calibrated" + b"\xff" * 13  # 32 bytes
         sw_version = b"3.0" + b"\xff" * 29               # 32 bytes
         model_version = b"1.0" + b"\xff" * 29            # 32 bytes
         serial = b"AQ-100" + b"\xff" * 26                # 32 bytes
@@ -298,8 +351,11 @@ class CanWriter:
         tws_water: Optional[float] = None,
         twa_ground: Optional[float] = None,
         tws_ground: Optional[float] = None,
+        heading_mag: Optional[float] = None,
+        bsp_kt: Optional[float] = None,
+        depth_m: Optional[float] = None,
     ) -> None:
-        """Publish PGN 130306 for water- and ground-referenced true wind."""
+        """Publish calibrated PGNs onto the NMEA 2000 bus."""
         if not self._enabled:
             return
         if not self._address_claimed:
@@ -307,32 +363,48 @@ class CanWriter:
 
         self._check_iso_requests()
 
-        # CAN ID for PGN 130306: priority 2, PGN 0x1FD02 (includes data page)
-        base_can_id = (2 << 26) | (0x1FD02 << 8) | self._address
+        # Collect (can_id, data) pairs to send
+        frames: list[tuple[int, bytes]] = []
+        sa = self._address
 
-        msgs = []
+        # PGN 130306 — Wind Data
         if twa_water is not None and tws_water is not None:
-            data = encode_pgn_130306(twa_water, tws_water, WIND_REF_TRUE_WATER)
-            msgs.append(data)
+            can_id = (2 << 26) | (0x1FD02 << 8) | sa
+            frames.append((can_id, encode_pgn_130306(twa_water, tws_water, WIND_REF_TRUE_WATER)))
 
         if twa_ground is not None and tws_ground is not None:
-            data = encode_pgn_130306(twa_ground, tws_ground, WIND_REF_TRUE_GROUND)
-            msgs.append(data)
+            can_id = (2 << 26) | (0x1FD02 << 8) | sa
+            frames.append((can_id, encode_pgn_130306(twa_ground, tws_ground, WIND_REF_TRUE_GROUND)))
+
+        # PGN 127250 — Vessel Heading
+        if heading_mag is not None:
+            can_id = (2 << 26) | (0x1F112 << 8) | sa
+            frames.append((can_id, encode_pgn_127250(heading_mag, magnetic=True)))
+
+        # PGN 128259 — Speed, Water Referenced
+        if bsp_kt is not None:
+            can_id = (2 << 26) | (0x1F503 << 8) | sa
+            frames.append((can_id, encode_pgn_128259(bsp_kt)))
+
+        # PGN 128267 — Water Depth
+        if depth_m is not None:
+            can_id = (2 << 26) | (0x1F50B << 8) | sa
+            frames.append((can_id, encode_pgn_128267(depth_m)))
 
         if self._dry_run:
-            for data in msgs:
-                logger.info("CAN dry-run PGN 130306: %s", data.hex())
+            for can_id, data in frames:
+                logger.info("CAN dry-run 0x%08X: %s", can_id, data.hex())
             return
 
         import can  # lazy import
 
-        for data in msgs:
+        for frame_can_id, data in frames:
             msg = can.Message(
-                arbitration_id=base_can_id,
+                arbitration_id=frame_can_id,
                 data=data,
                 is_extended_id=True,
             )
             try:
                 self._bus.send(msg)
             except Exception:
-                logger.exception("Failed to send PGN 130306")
+                logger.exception("Failed to send CAN frame 0x%08X", frame_can_id)

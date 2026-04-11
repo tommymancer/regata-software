@@ -294,10 +294,13 @@ async def _pipeline_loop(source: NmeaSource) -> None:
 
                     compute_true_wind(state)
 
-                    # Publish corrected true wind onto CAN bus
+                    # Publish all calibrated data onto CAN bus
                     can_writer.update(
                         twa_water=state.twa_deg,
                         tws_water=state.tws_kt,
+                        heading_mag=state.heading_mag,
+                        bsp_kt=state.bsp_kt,
+                        depth_m=state.depth_m,
                     )
 
                     compute_derived(state)
