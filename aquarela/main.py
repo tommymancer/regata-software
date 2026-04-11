@@ -38,6 +38,7 @@ from .pipeline.true_wind import compute_true_wind
 from .pipeline.upwash_learning import UpwashLearner
 from .pipeline.upwash_table import UpwashTableSet
 from .pipeline.wind_correction import apply_wind_correction
+from .nmea.can_writer import CanWriter
 from .race.marks import Mark, MarkStore
 from .race.navigation import compute_navigation
 from .race.timer import RaceTimer
@@ -136,6 +137,12 @@ polar_learners: dict[str, PolarLearner] = {
 # Convenience alias for the active learner (used by API)
 polar_learner: PolarLearner = polar_learners[config.sail_config_key()]
 
+# CAN writer — sends corrected true wind as PGN 130306
+can_writer = CanWriter(
+    enabled=config.can_writer_enabled,
+    dry_run=config.can_writer_dry_run,
+)
+
 active_source: NmeaSource | None = None  # global reference for interactive REST API
 
 
@@ -154,7 +161,7 @@ def _create_source() -> NmeaSource:
         # Lazy import — keeps Mac dev working without SocketCAN
         from aquarela.nmea.source_can import CanSource
         interface = config.source if config.source != "can" else "can0"
-        active_source = CanSource(interface=interface)
+        active_source = CanSource(interface=interface, ignore_addresses={100})
     else:
         raise ValueError(f"Unknown source: {config.source}")
     return active_source
@@ -286,6 +293,13 @@ async def _pipeline_loop(source: NmeaSource) -> None:
                     apply_wind_correction(state, _upwash_table, _heel_smoothed)
 
                     compute_true_wind(state)
+
+                    # Publish corrected true wind onto CAN bus
+                    can_writer.update(
+                        twa_water=state.twa_deg,
+                        tws_water=state.tws_kt,
+                    )
+
                     compute_derived(state)
                     damping.apply(state)
 
@@ -550,6 +564,7 @@ async def lifespan(app: FastAPI):
         from .api.course_setup import restore_course
         restore_course()
 
+    can_writer.start()
     _pipeline_task = asyncio.create_task(_pipeline_loop(source))
     _heartbeat_task = asyncio.create_task(_heartbeat_loop())
     _cleanup_task = asyncio.create_task(_periodic_cleanup())
@@ -563,6 +578,7 @@ async def lifespan(app: FastAPI):
             await task
         except asyncio.CancelledError:
             pass
+    can_writer.stop()
     logger.info("Pipeline stopped")
 
 
@@ -644,9 +660,13 @@ async def set_calibration(payload: dict):
     if "can_writer_enabled" in payload:
         config.can_writer_enabled = bool(payload["can_writer_enabled"])
         changed["can_writer_enabled"] = config.can_writer_enabled
+        can_writer._enabled = config.can_writer_enabled
+        if config.can_writer_enabled and not can_writer._address_claimed:
+            can_writer.start()
     if "can_writer_dry_run" in payload:
         config.can_writer_dry_run = bool(payload["can_writer_dry_run"])
         changed["can_writer_dry_run"] = config.can_writer_dry_run
+        can_writer._dry_run = config.can_writer_dry_run
 
     if changed:
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -934,6 +954,7 @@ async def list_logs():
 @app.get("/api/logs/{filename}")
 async def download_log(filename: str):
     """Download a session CSV file."""
+    from fastapi import HTTPException
     # Sanitize: only allow simple filenames
     if "/" in filename or "\\" in filename or ".." in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
@@ -944,6 +965,71 @@ async def download_log(filename: str):
         path, media_type="text/csv", filename=filename,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ── OTA update from GitHub ──────────────────────────────────────────────
+
+@app.get("/api/system/version")
+async def system_version():
+    """Return current git commit info."""
+    import subprocess
+    repo = Path(__file__).parent.parent
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=repo, timeout=5,
+        ).decode().strip()
+        msg = subprocess.check_output(
+            ["git", "log", "-1", "--format=%s"], cwd=repo, timeout=5,
+        ).decode().strip()
+        date = subprocess.check_output(
+            ["git", "log", "-1", "--format=%ci"], cwd=repo, timeout=5,
+        ).decode().strip()
+        return {"sha": sha, "message": msg, "date": date}
+    except Exception as e:
+        return {"sha": "unknown", "message": str(e), "date": ""}
+
+
+@app.post("/api/system/update")
+async def system_update():
+    """Pull latest code from GitHub, rebuild frontend, restart service."""
+    import subprocess
+    repo = Path(__file__).parent.parent
+
+    steps = []
+    try:
+        # 1. git pull
+        result = subprocess.run(
+            ["git", "pull", "--ff-only"],
+            cwd=repo, capture_output=True, text=True, timeout=60,
+        )
+        steps.append({"step": "git pull", "ok": result.returncode == 0,
+                       "output": result.stdout.strip() or result.stderr.strip()})
+        if result.returncode != 0:
+            return {"success": False, "steps": steps}
+
+        # 2. npm build (if frontend exists)
+        frontend_dir = repo / "frontend"
+        if (frontend_dir / "package.json").exists():
+            result = subprocess.run(
+                ["npm", "run", "build"],
+                cwd=frontend_dir, capture_output=True, text=True, timeout=120,
+            )
+            steps.append({"step": "npm build", "ok": result.returncode == 0,
+                           "output": result.stdout[-200:] if result.stdout else result.stderr[-200:]})
+        else:
+            steps.append({"step": "npm build", "ok": True, "output": "skipped (no frontend)"})
+
+        # 3. Restart service (async — returns before restart completes)
+        subprocess.Popen(
+            ["sudo", "systemctl", "restart", "aquarela"],
+            cwd=repo,
+        )
+        steps.append({"step": "restart", "ok": True, "output": "scheduled"})
+
+        return {"success": True, "steps": steps}
+    except Exception as e:
+        steps.append({"step": "error", "ok": False, "output": str(e)})
+        return {"success": False, "steps": steps}
 
 
 # ── Static files (Svelte dashboard, when built) ─────────────────────────

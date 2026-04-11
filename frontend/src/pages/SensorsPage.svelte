@@ -118,6 +118,7 @@
     padding: var(--gap-compact) var(--pad-compact);
     min-height: 0;
     position: relative;
+    overflow: hidden;
   }
   .cell.wide {
     grid-column: 1 / -1;
@@ -132,14 +133,14 @@
   }
   .val {
     font-family: "SF Mono", "Menlo", monospace;
-    font-size: clamp(48px, 15vw, 80px);
+    font-size: clamp(28px, 8vw, 48px);
     font-weight: 800;
     color: var(--text);
     text-shadow: var(--glow-text);
     line-height: 1.1;
   }
   .cell.wide .val {
-    font-size: clamp(60px, 20vw, 108px);
+    font-size: clamp(40px, 12vw, 72px);
   }
   .val.coord {
     font-size: clamp(20px, 5vw, 28px);

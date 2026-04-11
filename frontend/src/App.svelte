@@ -14,7 +14,6 @@
   import RegattaPage from "./pages/RegattaPage.svelte";
   import RaceTimerPage from "./pages/RaceTimerPage.svelte";
   import TrimPage from "./pages/TrimPage.svelte";
-  import PolarPage from "./pages/PolarPage.svelte";
   import CourseSetupPage from "./pages/CourseSetupPage.svelte";
   import MapPage from "./pages/MapPage.svelte";
   import SensorsPage from "./pages/SensorsPage.svelte";
@@ -38,7 +37,6 @@
     { name: "trim",           label: "Trim Book",       icon: "▤" },
     { name: "trim_guide",     label: "Trim Guide",      icon: "▧" },
     { name: "polar_diagram",  label: "Polar Diagram",   icon: "◑" },
-    { name: "polar",          label: "Polar Learning",  icon: "◐" },
     { name: "system",         label: "Sistema",         icon: "⚙" },
   ];
 
@@ -141,8 +139,6 @@
           <TrimGuidePage />
         {:else if menuPage === "polar_diagram"}
           <PolarDiagramPage />
-        {:else if menuPage === "polar"}
-          <PolarPage />
         {:else if menuPage === "system"}
           <SystemPage />
         {/if}

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.AquarelaViewer" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#1a1a2e</item>
+        <item name="colorPrimaryDark">#16213e</item>
+        <item name="colorAccent">#4CAF50</item>
+        <item name="android:statusBarColor">#16213e</item>
+        <item name="android:navigationBarColor">#1a1a2e</item>
+    </style>
+</resources>

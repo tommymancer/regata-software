@@ -12,6 +12,8 @@
 
   $: configKey = $boatState?.active_sail_config ?? "main_1__genoa";
   $: shortLabel = sailData?.label ?? configKey;
+  $: mainLabels = sailData?.main_labels ?? {};
+  $: headsailLabels = sailData?.headsail_labels ?? {};
 
   onMount(async () => {
     try {
@@ -43,9 +45,9 @@
         const data = await res.json();
         sailData = { ...sailData, active_main: data.active_main, active_config_key: data.active_config_key };
         boatState.update(s => s ? { ...s, active_sail_config: data.active_config_key } : s);
-        // Re-fetch to update labels
         const r2 = await fetch("/api/sails");
         sailData = await r2.json();
+        open = false;
       }
     } catch (e) { /* ignore */ }
     loading = false;
@@ -66,6 +68,7 @@
         boatState.update(s => s ? { ...s, active_sail_config: data.active_config_key } : s);
         const r2 = await fetch("/api/sails");
         sailData = await r2.json();
+        open = false;
       }
     } catch (e) { /* ignore */ }
     loading = false;
@@ -95,7 +98,7 @@
             disabled={loading}
             on:click={() => pickMain(main)}
           >
-            <span class="opt-short">{main.replace("_", " ").toUpperCase()}</span>
+            <span class="opt-short">{mainLabels[main] ?? main}</span>
           </button>
         {/each}
       </div>
@@ -109,8 +112,7 @@
             disabled={loading}
             on:click={() => pickHeadsail(hs.name)}
           >
-            <span class="opt-short">{hs.name.replace("_", " ").toUpperCase()}</span>
-            <span class="opt-label">{hs.category}</span>
+            <span class="opt-short">{headsailLabels[hs.name] ?? hs.name}</span>
           </button>
         {/each}
       </div>
@@ -133,6 +135,12 @@
     touch-action: manipulation;
     text-shadow: var(--glow-accent);
     transition: opacity 0.15s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 160px;
+    position: relative;
+    z-index: 1;
   }
   .sail-btn:active {
     opacity: 0.7;
@@ -197,11 +205,5 @@
   .sail-option.active .opt-short {
     color: var(--accent);
     text-shadow: var(--glow-accent);
-  }
-  .opt-label {
-    font-size: 9px;
-    color: var(--text-dim);
-    text-align: center;
-    line-height: 1.2;
   }
 </style>

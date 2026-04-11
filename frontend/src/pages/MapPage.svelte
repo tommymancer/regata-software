@@ -10,6 +10,7 @@
   import { lat, lon, hdg, twd, tws, laylinePort, laylineStbd, nextMark, btw, dtw } from "../stores/boat.js";
   import { history } from "../stores/history.js";
   import { getThemeColors, withAlpha } from "../lib/theme.js";
+  import { LAKE_LUGANO_SHORE, MELIDE_BRIDGE } from "../lib/lake-lugano.js";
 
   let canvas;
   let ctx;
@@ -164,7 +165,14 @@
     }
     points.push({ x: 0, y: 0 }); // boat itself
 
-    let maxDist = 100; // minimum 100m view radius
+    // Include nearby shore points so the lake outline is visible
+    for (const [lt, ln] of LAKE_LUGANO_SHORE) {
+      const sp = toLocal(lt, ln, boatLat, boatLon);
+      const d = Math.sqrt(sp.x * sp.x + sp.y * sp.y);
+      if (d < 5000) points.push(sp); // only within 5 km
+    }
+
+    let maxDist = 200; // minimum 200m view radius
     for (const p of points) {
       const d = Math.max(Math.abs(p.x), Math.abs(p.y));
       if (d > maxDist) maxDist = d;
@@ -182,6 +190,9 @@
         sy: cy + local.y * scale,
       };
     }
+
+    // ── Lake shoreline (background layer) ──────────────────
+    drawLakeShoreline(ctx, colors, boatLat, boatLon, toScreen);
 
     // ── Grid / scale bar ─────────────────────────────────────
     drawScaleBar(ctx, colors, maxDist, scale, w, h);
@@ -541,6 +552,56 @@
       ctx.moveTo(markScr.sx, markScr.sy);
       ctx.lineTo(endScr.sx, endScr.sy);
       ctx.strokeStyle = withAlpha(color, 0.5);
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // ── Lake shoreline ─────────────────────────────────────────
+  function drawLakeShoreline(ctx, colors, boatLat, boatLon, toScreen) {
+    if (!LAKE_LUGANO_SHORE.length) return;
+
+    // Water fill
+    ctx.beginPath();
+    for (let i = 0; i < LAKE_LUGANO_SHORE.length; i++) {
+      const [lt, ln] = LAKE_LUGANO_SHORE[i];
+      const local = toLocal(lt, ln, boatLat, boatLon);
+      const { sx, sy } = toScreen(local);
+      if (i === 0) ctx.moveTo(sx, sy);
+      else ctx.lineTo(sx, sy);
+    }
+    ctx.closePath();
+    ctx.fillStyle = withAlpha(colors.accent, 0.06);
+    ctx.fill();
+
+    // Shore outline
+    ctx.beginPath();
+    for (let i = 0; i < LAKE_LUGANO_SHORE.length; i++) {
+      const [lt, ln] = LAKE_LUGANO_SHORE[i];
+      const local = toLocal(lt, ln, boatLat, boatLon);
+      const { sx, sy } = toScreen(local);
+      if (i === 0) ctx.moveTo(sx, sy);
+      else ctx.lineTo(sx, sy);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = withAlpha(colors.textDim, 0.35);
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Melide bridge
+    if (MELIDE_BRIDGE.length === 2) {
+      const [a, b] = MELIDE_BRIDGE;
+      const aLocal = toLocal(a[0], a[1], boatLat, boatLon);
+      const bLocal = toLocal(b[0], b[1], boatLat, boatLon);
+      const aScr = toScreen(aLocal);
+      const bScr = toScreen(bLocal);
+      ctx.save();
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(aScr.sx, aScr.sy);
+      ctx.lineTo(bScr.sx, bScr.sy);
+      ctx.strokeStyle = withAlpha(colors.textDim, 0.4);
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.restore();

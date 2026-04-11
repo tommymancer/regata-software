@@ -18,13 +18,12 @@
     "main_2__genoa": "R2/G",
     "main_2__gennaker": "R2/GK",
   };
-  let showMode = "active"; // "base", "learned", "active" (learned if available, else base)
+  let showMode = "learned"; // "base", "learned", "diff"
 
-  $: curves = showMode === "base"
-    ? data?.base_curves || {}
-    : showMode === "learned"
-      ? data?.learned_curves || {}
-      : (data?.has_learned ? data?.learned_curves : data?.base_curves) || {};
+  // Active curves: show learned if available and selected, else base
+  $: curves = (showMode === "learned" && data?.has_learned)
+    ? data?.learned_curves || {}
+    : data?.base_curves || {};
 
   $: baseCurves = data?.base_curves || {};
 
@@ -60,11 +59,11 @@
   $: lookup = buildLookup(curves);
   $: baseLookup = buildLookup(baseCurves);
 
-  // Targets
-  $: upTargets = showMode === "learned" || (showMode === "active" && data?.has_learned)
+  // Targets: learned if available and not explicitly viewing base
+  $: upTargets = (showMode !== "base" && data?.has_learned)
     ? data?.learned_targets?.upwind || {}
     : data?.base_targets?.upwind || {};
-  $: downTargets = showMode === "learned" || (showMode === "active" && data?.has_learned)
+  $: downTargets = (showMode !== "base" && data?.has_learned)
     ? data?.learned_targets?.downwind || {}
     : data?.base_targets?.downwind || {};
 
@@ -114,11 +113,28 @@
       : `rgba(255, 23, 68, ${alpha})`;
   }
 
+  let stats = null;
+  let resetting = false;
+
   async function fetchData() {
     try {
-      const res = await fetch("/api/polar/diagram");
-      data = await res.json();
+      const [dRes, sRes] = await Promise.all([
+        fetch("/api/polar/diagram"),
+        fetch("/api/polar/stats"),
+      ]);
+      data = await dRes.json();
+      stats = await sRes.json();
     } catch (e) { /* ignore */ }
+  }
+
+  async function resetToBase() {
+    if (!confirm("Tornare alla polar base?")) return;
+    resetting = true;
+    try {
+      await fetch("/api/polar/reset-to-base", { method: "POST" });
+      await fetchData();
+    } catch (e) { /* ignore */ }
+    resetting = false;
   }
 
   let interval;
@@ -135,15 +151,13 @@
 <div class="page">
   <h2 class="title">TABELLA POLARE — {SAIL_LABELS[$sailConfig] || $sailConfig}</h2>
 
-  <!-- Mode toggle -->
+  <!-- Mode toggle (only when learned polar exists) -->
   <div class="toggles">
-    <button class="toggle-btn" class:active={showMode === "active"}
-      on:click={() => showMode = "active"}>ATTIVA</button>
-    <button class="toggle-btn" class:active={showMode === "base"}
-      on:click={() => showMode = "base"}>BASE</button>
     {#if data?.has_learned}
       <button class="toggle-btn" class:active={showMode === "learned"}
         on:click={() => showMode = "learned"}>APPRESA</button>
+      <button class="toggle-btn" class:active={showMode === "base"}
+        on:click={() => showMode = "base"}>BASE</button>
       <button class="toggle-btn" class:active={showMode === "diff"}
         on:click={() => showMode = "diff"}>DIFF</button>
     {/if}
@@ -151,6 +165,20 @@
       <span class="live-wind">TWS {liveTws.toFixed(0)} kt</span>
     {/if}
   </div>
+
+  <!-- Learning stats -->
+  {#if stats}
+    <div class="stats-line">
+      <span>{stats.total_samples.toLocaleString("it")} campioni</span>
+      <span>·</span>
+      <span>{stats.bins_ready} bin pronti</span>
+      <span>·</span>
+      <span>{stats.coverage_pct}% copertura</span>
+      {#if stats.has_learned_polar}
+        <span class="learned-badge">APPRESA</span>
+      {/if}
+    </div>
+  {/if}
 
   <!-- Targets row -->
   {#if closestTws != null}
@@ -226,6 +254,13 @@
     <div class="empty-state">
       <div class="empty-text">Nessun dato polare disponibile</div>
     </div>
+  {/if}
+
+  <!-- Reset to base -->
+  {#if data?.has_learned}
+    <button class="reset-btn" on:click={resetToBase} disabled={resetting}>
+      {resetting ? "..." : "RESET POLAR BASE"}
+    </button>
   {/if}
 </div>
 
@@ -397,6 +432,40 @@
     font-weight: 700;
     color: #fff;
   }
+
+  /* ── Stats line ───────────────────────────────── */
+  .stats-line {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    align-items: center;
+    font-size: var(--label-xs-size);
+    color: var(--text-dim);
+    letter-spacing: 0.03em;
+    flex-shrink: 0;
+  }
+  .learned-badge {
+    font-weight: 800;
+    color: var(--green);
+    letter-spacing: 0.08em;
+  }
+
+  /* ── Reset button ────────────────────────────── */
+  .reset-btn {
+    font-size: var(--label-xs-size);
+    font-weight: var(--label-xs-weight);
+    letter-spacing: var(--label-xs-spacing);
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    touch-action: manipulation;
+    align-self: center;
+    flex-shrink: 0;
+  }
+  .reset-btn:active { opacity: 0.6; }
 
   .empty-state {
     flex: 1;
