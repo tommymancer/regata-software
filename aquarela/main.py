@@ -1190,9 +1190,25 @@ async def download_log(filename: str):
 
 # ── OTA update from GitHub ──────────────────────────────────────────────
 
+_version_file = Path("data/version.json")
+
+
 @app.get("/api/system/version")
 async def system_version():
-    """Return current git commit info."""
+    """Return current version info.
+
+    Reads from data/version.json (written by OTA update) first,
+    falls back to git if available.
+    """
+    # Try OTA version file first
+    if _version_file.exists():
+        try:
+            with open(_version_file) as f:
+                return json.load(f)
+        except Exception:
+            pass
+
+    # Fallback: git
     import subprocess
     repo = Path(__file__).parent.parent
     try:
@@ -1266,6 +1282,21 @@ async def system_update(request: Request):
                     shutil.copy2(item, dest)
 
             steps.append({"step": "sync", "ok": True, "output": "File aggiornati"})
+
+            # 3b. Save version info from tarball folder name
+            # GitHub tarballs: "user-repo-sha" → extract SHA
+            _parts = src_dir.name.rsplit("-", 1)
+            if len(_parts) == 2:
+                _ota_sha = _parts[1][:7]
+                _version_data = {
+                    "sha": _ota_sha,
+                    "message": f"OTA update",
+                    "date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %z"),
+                }
+                _vf = repo / "data" / "version.json"
+                _vf.parent.mkdir(parents=True, exist_ok=True)
+                with open(_vf, "w") as _f:
+                    json.dump(_version_data, _f)
 
         # 4. npm build — skip if pre-built static assets exist in tarball
         static_dir = repo / "aquarela" / "static" / "assets"
