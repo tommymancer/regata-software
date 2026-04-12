@@ -17,7 +17,7 @@ class AquarelaConfig:
     compass_offset: float = 0.0
     speed_factor: float = 1.0
     awa_offset: float = 0.0
-    depth_offset: float = -1.85       # keel depth on Nitro 80
+    depth_offset: float = 0.30        # transducer 30cm below waterline → true bottom depth
     tws_downwind_factor: float = 1.0
     magnetic_variation: float = 2.5   # Lake Lugano ≈ +2.5° east (2025)
 
@@ -106,7 +106,7 @@ class AquarelaConfig:
             speed_factor=cal.get("speed", {}).get("factor", 1.0),
             awa_offset=cal.get("wind", {}).get("awa_offset", 0.0),
             tws_downwind_factor=cal.get("wind", {}).get("tws_downwind_factor", 1.0),
-            depth_offset=cal.get("depth", {}).get("offset", -1.85),
+            depth_offset=cal.get("depth", {}).get("offset", 0.30),
             magnetic_variation=raw.get("magnetic_variation", 2.5),
             sample_rate_hz=raw.get("sample_rate_hz", 10),
             csv_rate_hz=raw.get("csv_rate_hz", 2),
