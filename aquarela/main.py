@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Set
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -993,36 +993,80 @@ async def system_version():
 
 
 @app.post("/api/system/update")
-async def system_update():
-    """Pull latest code from GitHub, rebuild frontend, restart service."""
+async def system_update(request: Request):
+    """Receive tarball from Android app, extract, rebuild, restart.
+
+    The Android app downloads the tarball from GitHub and uploads it here,
+    so the Pi doesn't need internet access.
+    """
     import subprocess
+    import tarfile
+    import tempfile
+    import shutil
+
     repo = Path(__file__).parent.parent
-
     steps = []
+
     try:
-        # 1. git pull
-        result = subprocess.run(
-            ["git", "pull", "--ff-only"],
-            cwd=repo, capture_output=True, text=True, timeout=60,
-        )
-        steps.append({"step": "git pull", "ok": result.returncode == 0,
-                       "output": result.stdout.strip() or result.stderr.strip()})
-        if result.returncode != 0:
-            return {"success": False, "steps": steps}
+        # 1. Receive tarball
+        body = await request.body()
+        if len(body) < 100:
+            return {"success": False, "steps": [{"step": "upload", "ok": False,
+                    "output": f"Tarball troppo piccolo ({len(body)} bytes)"}]}
+        steps.append({"step": "upload", "ok": True,
+                       "output": f"Ricevuto {len(body) // 1024} KB"})
 
-        # 2. npm build (if frontend exists)
-        frontend_dir = repo / "frontend"
-        if (frontend_dir / "package.json").exists():
-            result = subprocess.run(
-                ["npm", "run", "build"],
-                cwd=frontend_dir, capture_output=True, text=True, timeout=120,
-            )
-            steps.append({"step": "npm build", "ok": result.returncode == 0,
-                           "output": result.stdout[-200:] if result.stdout else result.stderr[-200:]})
+        # 2. Extract to temp dir
+        with tempfile.TemporaryDirectory() as tmp:
+            tar_path = Path(tmp) / "update.tar.gz"
+            tar_path.write_bytes(body)
+
+            with tarfile.open(tar_path, "r:gz") as tar:
+                tar.extractall(tmp)
+
+            # GitHub tarballs have a top-level dir like "user-repo-sha/"
+            subdirs = [d for d in Path(tmp).iterdir() if d.is_dir()]
+            if not subdirs:
+                return {"success": False, "steps": steps + [
+                    {"step": "extract", "ok": False, "output": "Nessuna cartella nell'archivio"}]}
+            src_dir = subdirs[0]
+            steps.append({"step": "extract", "ok": True,
+                           "output": f"Estratto in {src_dir.name}"})
+
+            # 3. Sync files (exclude data, config, sessions, .git)
+            exclude = {".git", "data", "node_modules", "venv", "__pycache__",
+                       "aquarela-android", ".claude"}
+            for item in src_dir.iterdir():
+                if item.name in exclude:
+                    continue
+                dest = repo / item.name
+                if item.is_dir():
+                    if dest.exists():
+                        shutil.rmtree(dest)
+                    shutil.copytree(item, dest)
+                else:
+                    shutil.copy2(item, dest)
+
+            steps.append({"step": "sync", "ok": True, "output": "File aggiornati"})
+
+        # 4. npm build — skip if pre-built static assets exist in tarball
+        static_dir = repo / "aquarela" / "static" / "assets"
+        if static_dir.exists() and any(static_dir.glob("*.js")):
+            steps.append({"step": "frontend", "ok": True,
+                           "output": "pre-built assets presenti"})
         else:
-            steps.append({"step": "npm build", "ok": True, "output": "skipped (no frontend)"})
+            frontend_dir = repo / "frontend"
+            if (frontend_dir / "package.json").exists():
+                result = subprocess.run(
+                    ["npm", "run", "build"],
+                    cwd=frontend_dir, capture_output=True, text=True, timeout=120,
+                )
+                steps.append({"step": "npm build", "ok": result.returncode == 0,
+                               "output": result.stdout[-200:] if result.stdout else result.stderr[-200:]})
+            else:
+                steps.append({"step": "frontend", "ok": True, "output": "skipped"})
 
-        # 3. Restart service (async — returns before restart completes)
+        # 5. Restart service
         subprocess.Popen(
             ["sudo", "systemctl", "restart", "aquarela"],
             cwd=repo,

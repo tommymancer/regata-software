@@ -42,10 +42,10 @@ class TestCalibrationPassThrough:
         apply_calibration(state_with_raw_data, default_config)
         assert state_with_raw_data.awa_deg == -42.0
 
-    def test_depth_with_keel_offset(self, state_with_raw_data, default_config):
-        """Default depth_offset is -1.85 (keel depth)."""
+    def test_depth_with_waterline_offset(self, state_with_raw_data, default_config):
+        """Default depth_offset is +0.30 (transducer 30cm below waterline)."""
         apply_calibration(state_with_raw_data, default_config)
-        assert abs(state_with_raw_data.depth_m - (15.0 - 1.85)) < 0.01
+        assert abs(state_with_raw_data.depth_m - (15.0 + 0.30)) < 0.01
 
     def test_sog_pass_through(self, state_with_raw_data, default_config):
         apply_calibration(state_with_raw_data, default_config)

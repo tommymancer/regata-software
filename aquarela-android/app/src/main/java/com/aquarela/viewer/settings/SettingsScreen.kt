@@ -1,5 +1,7 @@
 package com.aquarela.viewer.settings
 
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -17,25 +19,56 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
+private const val GITHUB_TARBALL =
+    "https://api.github.com/repos/tommymancer/regata-software/tarball/master"
+
+private const val GITHUB_COMMITS =
+    "https://api.github.com/repos/tommymancer/regata-software/commits/master"
+
 @Composable
 fun SettingsScreen(piBaseUrl: String?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     var currentVersion by remember { mutableStateOf<String?>(null) }
+    var latestVersion by remember { mutableStateOf<String?>(null) }
     var updating by remember { mutableStateOf(false) }
+    var updateStatus by remember { mutableStateOf<String?>(null) }
     var updateResult by remember { mutableStateOf<String?>(null) }
 
-    // Fetch current version on load
+    // Fetch current Pi version + latest GitHub version
     LaunchedEffect(piBaseUrl) {
-        if (piBaseUrl == null) return@LaunchedEffect
+        // Pi version
+        if (piBaseUrl != null) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val json = httpGet("$piBaseUrl/api/system/version")
+                    val obj = JSONObject(json)
+                    currentVersion = obj.optString("sha", "?").take(7) +
+                            " — " + obj.optString("message", "")
+                } catch (_: Exception) {
+                    currentVersion = "non raggiungibile"
+                }
+            }
+        }
+        // GitHub latest (via cellular, unbind from WiFi)
         withContext(Dispatchers.IO) {
+            val cm = context.getSystemService(ConnectivityManager::class.java)
+            cm.bindProcessToNetwork(null)
             try {
-                val json = httpGet("$piBaseUrl/api/system/version")
+                val json = httpGet(GITHUB_COMMITS)
                 val obj = JSONObject(json)
-                currentVersion = "${obj.optString("sha", "?")} — ${obj.optString("message", "")}"
+                val sha = obj.optString("sha", "?").take(7)
+                val msg = obj.optJSONObject("commit")?.optString("message", "") ?: ""
+                latestVersion = "$sha — ${msg.lines().first()}"
             } catch (_: Exception) {
-                currentVersion = "non raggiungibile"
+                latestVersion = "impossibile verificare"
+            } finally {
+                val wifiNet = cm.allNetworks.firstOrNull { net ->
+                    cm.getNetworkCapabilities(net)
+                        ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+                }
+                cm.bindProcessToNetwork(wifiNet)
             }
         }
     }
@@ -72,7 +105,8 @@ fun SettingsScreen(piBaseUrl: String?) {
                 Text("Aggiornamento Software", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
 
-                Text("Versione attuale: ${currentVersion ?: "caricamento..."}")
+                Text("Pi: ${currentVersion ?: "caricamento..."}")
+                Text("GitHub: ${latestVersion ?: "caricamento..."}")
 
                 Spacer(Modifier.height(12.dp))
 
@@ -83,11 +117,32 @@ fun SettingsScreen(piBaseUrl: String?) {
                             return@Button
                         }
                         updating = true
+                        updateStatus = "Scaricamento da GitHub..."
                         updateResult = null
                         scope.launch {
                             try {
+                                val cm = context.getSystemService(ConnectivityManager::class.java)
+
+                                // 1. Download tarball from GitHub via cellular
+                                //    Unbind from WiFi so traffic goes through cellular
+                                val tarball = withContext(Dispatchers.IO) {
+                                    cm.bindProcessToNetwork(null)
+                                    try {
+                                        downloadBytes(GITHUB_TARBALL)
+                                    } finally {
+                                        // Re-bind to WiFi for Pi communication
+                                        val wifiNet = cm.allNetworks.firstOrNull { net ->
+                                            cm.getNetworkCapabilities(net)
+                                                ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+                                        }
+                                        cm.bindProcessToNetwork(wifiNet)
+                                    }
+                                }
+                                updateStatus = "Invio al Pi (${tarball.size / 1024} KB)..."
+
+                                // 2. Upload to Pi (already re-bound to WiFi)
                                 val json = withContext(Dispatchers.IO) {
-                                    httpPost("$piBaseUrl/api/system/update")
+                                    httpPostBytes("$piBaseUrl/api/system/update", tarball)
                                 }
                                 val obj = JSONObject(json)
                                 val success = obj.optBoolean("success", false)
@@ -104,6 +159,8 @@ fun SettingsScreen(piBaseUrl: String?) {
                                     }
                                 }
                                 updateResult = summary
+                                updateStatus = null
+
                                 if (success) {
                                     // Refresh version after restart
                                     kotlinx.coroutines.delay(5000)
@@ -112,11 +169,13 @@ fun SettingsScreen(piBaseUrl: String?) {
                                             httpGet("$piBaseUrl/api/system/version")
                                         }
                                         val v = JSONObject(vJson)
-                                        currentVersion = "${v.optString("sha", "?")} — ${v.optString("message", "")}"
+                                        currentVersion = v.optString("sha", "?").take(7) +
+                                                " — " + v.optString("message", "")
                                     } catch (_: Exception) {}
                                 }
                             } catch (e: Exception) {
                                 updateResult = "Errore: ${e.message}"
+                                updateStatus = null
                             }
                             updating = false
                         }
@@ -131,9 +190,9 @@ fun SettingsScreen(piBaseUrl: String?) {
                             strokeWidth = 2.dp,
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("Aggiornamento in corso...")
+                        Text(updateStatus ?: "Aggiornamento in corso...")
                     } else {
-                        Text("Aggiorna da GitHub")
+                        Text("Aggiorna Pi da GitHub")
                     }
                 }
 
@@ -162,14 +221,31 @@ private fun httpGet(url: String): String {
     }
 }
 
-private fun httpPost(url: String): String {
+/** Download binary content, following redirects. */
+private fun downloadBytes(url: String): ByteArray {
     val conn = URL(url).openConnection() as HttpURLConnection
     conn.connectTimeout = 10_000
-    conn.readTimeout = 120_000
+    conn.readTimeout = 60_000
+    conn.instanceFollowRedirects = true
+    return try {
+        if (conn.responseCode != 200) throw Exception("HTTP ${conn.responseCode}")
+        conn.inputStream.readBytes()
+    } finally {
+        conn.disconnect()
+    }
+}
+
+/** POST raw bytes to URL, return response body. */
+private fun httpPostBytes(url: String, data: ByteArray): String {
+    val conn = URL(url).openConnection() as HttpURLConnection
+    conn.connectTimeout = 10_000
+    conn.readTimeout = 180_000  // extraction + npm build can be slow
     conn.requestMethod = "POST"
     conn.doOutput = true
-    conn.outputStream.write(ByteArray(0))
+    conn.setRequestProperty("Content-Type", "application/gzip")
+    conn.setRequestProperty("Content-Length", data.size.toString())
     return try {
+        conn.outputStream.use { it.write(data) }
         if (conn.responseCode != 200) throw Exception("HTTP ${conn.responseCode}")
         conn.inputStream.bufferedReader().readText()
     } finally {
