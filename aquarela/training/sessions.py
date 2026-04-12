@@ -48,10 +48,10 @@ class SessionManager:
     auto-starts or auto-stops, the corresponding callback fires.
     """
 
-    START_SPEED_THRESHOLD: float = 0.5  # kt — BSP or SOG to start
-    STOP_SPEED_THRESHOLD: float = 0.3   # kt — both BSP and SOG below to stop
-    START_DURATION_SECS: float = 10.0
-    STOP_DURATION_SECS: float = 1800.0  # 30 minutes
+    START_SPEED_THRESHOLD: float = 1.5  # kt — BSP or SOG to start (raised to avoid GPS jitter)
+    STOP_SPEED_THRESHOLD: float = 0.5   # kt — both BSP and SOG below to stop
+    START_DURATION_SECS: float = 30.0   # 30s sustained movement to start
+    STOP_DURATION_SECS: float = 600.0   # 10 minutes stationary to stop
     NMEA_TIMEOUT_SECS: float = 30.0     # no CAN frames → force stop
 
     def __init__(self, hz: int = 10, db_path: Optional[str] = None) -> None:
