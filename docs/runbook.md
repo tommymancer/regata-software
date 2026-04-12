@@ -5,7 +5,7 @@ Guida per Claude: come diagnosticare problemi su un Pi remoto usando i dati che 
 ## Regola fondamentale
 
 Le UNICHE azioni che puoi chiedere al cliente sono:
-- **Premere bottoni nell'app** (Diagnostica, CAN Dump, BLE Scan, Aggiorna Pi da GitHub)
+- **Premere bottoni nell'app** (Diagnostica, CAN Dump, BLE Scan, Aggiorna Pi)
 - **Azioni fisiche** (riaccendi sensore, controlla cavo, riavvia il Pi staccando e riattaccando l'alimentazione)
 
 MAI suggerire: SSH, terminale, comandi, modifica file, configurazioni manuali. Il cliente non ha accesso tecnico e non deve averlo.
@@ -59,7 +59,7 @@ Il file `~/.claude/boats.json` contiene l'elenco delle barche e i `telegram_chat
 1. "Sei connesso alla rete WiFi Aquarela?"
 2. "Prova a chiudere e riaprire l'app"
 3. Se ancora non funziona: "Prova a riavviare il Pi staccando e riattaccando il cavo di alimentazione"
-4. Se dopo il riavvio non funziona: "Vai su Impostazioni e premi Aggiorna Pi da GitHub"
+4. Se dopo il riavvio non funziona: "Vai su Impostazioni e premi Aggiorna Pi"
 
 ### "Sessioni fantasma" / "sessioni da 0 nm"
 
@@ -77,7 +77,7 @@ Il file `~/.claude/boats.json` contiene l'elenco delle barche e i `telegram_chat
 
 1. Chiedi Diagnostica → leggi i log per capire l'errore
 2. Se è un bug: Claude fixa il codice e pusha su GitHub
-3. "Vai su Impostazioni e premi **Aggiorna Pi da GitHub**"
+3. "Vai su Impostazioni e premi **Aggiorna Pi**"
 4. Dopo l'aggiornamento: "Premi **Diagnostica** e condividi qui per verificare"
 5. Controlla `version.sha` nel nuovo report
 

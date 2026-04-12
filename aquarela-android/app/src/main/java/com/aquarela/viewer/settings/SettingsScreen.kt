@@ -38,7 +38,7 @@ fun SettingsScreen(piBaseUrl: String?) {
     var updateStatus by remember { mutableStateOf<String?>(null) }
     var updateResult by remember { mutableStateOf<String?>(null) }
 
-    // Fetch current Pi version + latest GitHub version
+    // Fetch current Pi version + latest available version
     LaunchedEffect(piBaseUrl) {
         // Pi version
         if (piBaseUrl != null) {
@@ -53,7 +53,7 @@ fun SettingsScreen(piBaseUrl: String?) {
                 }
             }
         }
-        // GitHub latest (via cellular, unbind from WiFi)
+        // Latest version (via cellular, unbind from WiFi)
         withContext(Dispatchers.IO) {
             val cm = context.getSystemService(ConnectivityManager::class.java)
             cm.bindProcessToNetwork(null)
@@ -108,7 +108,7 @@ fun SettingsScreen(piBaseUrl: String?) {
                 Spacer(Modifier.height(8.dp))
 
                 Text("Pi: ${currentVersion ?: "caricamento..."}")
-                Text("GitHub: ${latestVersion ?: "caricamento..."}")
+                Text("Ultima versione: ${latestVersion ?: "caricamento..."}")
 
                 Spacer(Modifier.height(12.dp))
 
@@ -119,13 +119,13 @@ fun SettingsScreen(piBaseUrl: String?) {
                             return@Button
                         }
                         updating = true
-                        updateStatus = "Scaricamento da GitHub..."
+                        updateStatus = "Scaricamento aggiornamento..."
                         updateResult = null
                         scope.launch {
                             try {
                                 val cm = context.getSystemService(ConnectivityManager::class.java)
 
-                                // 1. Download tarball from GitHub via cellular
+                                // 1. Download update via cellular
                                 //    Unbind from WiFi so traffic goes through cellular
                                 val tarball = withContext(Dispatchers.IO) {
                                     cm.bindProcessToNetwork(null)
@@ -194,7 +194,7 @@ fun SettingsScreen(piBaseUrl: String?) {
                         Spacer(Modifier.width(8.dp))
                         Text(updateStatus ?: "Aggiornamento in corso...")
                     } else {
-                        Text("Aggiorna Pi da GitHub")
+                        Text("Aggiorna Pi")
                     }
                 }
 
@@ -430,7 +430,11 @@ private fun formatDiagReport(healthJson: String, logsJson: String): String {
     sb.appendLine("====================")
     sb.appendLine("Barca: ${h.optString("boat_name", "?")}")
     sb.appendLine("Versione: ${version?.optString("sha", "?")} - ${version?.optString("message", "")}")
-    sb.appendLine("Uptime: ${h.optInt("uptime_s", 0) / 60} min")
+    val uptimeSec = h.optInt("uptime_s", 0)
+    val uptimeStr = if (uptimeSec < 60) "${uptimeSec}s"
+        else if (uptimeSec < 3600) "${uptimeSec / 60}m ${uptimeSec % 60}s"
+        else "${uptimeSec / 3600}h ${(uptimeSec % 3600) / 60}m"
+    sb.appendLine("Uptime: $uptimeStr")
     sb.appendLine("Source: ${h.optString("source", "?")}")
     sb.appendLine()
 
