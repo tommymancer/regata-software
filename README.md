@@ -4,6 +4,17 @@ Open-source sailing instrument and performance system for NMEA 2000 boats.
 
 Aquarela runs on a Raspberry Pi connected to the boat's CAN bus, reads all instrument data, applies calibrations and wind corrections, and serves a real-time dashboard accessible from any device on board. A companion Android app provides offline session review with track maps and maneuver analysis.
 
+<p align="center">
+  <img src="docs/screenshots/regatta.png" width="250" alt="Regatta display">
+  <img src="docs/screenshots/race-timer.png" width="250" alt="Race timer">
+  <img src="docs/screenshots/map.png" width="250" alt="Navigation map">
+</p>
+<p align="center">
+  <img src="docs/screenshots/sensors.png" width="250" alt="Sensor readings">
+  <img src="docs/screenshots/polar.png" width="250" alt="Polar diagram">
+  <img src="docs/screenshots/calibration.png" width="250" alt="Calibration">
+</p>
+
 ## Architecture
 
 ```
