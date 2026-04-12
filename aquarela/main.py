@@ -10,6 +10,7 @@ Run with: uvicorn aquarela.main:app --host 0.0.0.0 --port 8000
 import asyncio
 import json
 import logging
+import logging.handlers
 import os
 import time
 from contextlib import asynccontextmanager
@@ -69,6 +70,23 @@ from .api.sails import router as sails_router
 
 
 logger = logging.getLogger("aquarela")
+
+# ── Structured logging with rotation ───────────────────────────────────
+_log_dir = Path("data")
+_log_dir.mkdir(parents=True, exist_ok=True)
+_log_file = _log_dir / "aquarela.log"
+_file_handler = logging.handlers.RotatingFileHandler(
+    _log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8",
+)
+_file_handler.setFormatter(logging.Formatter(
+    '{"ts":"%(asctime)s","level":"%(levelname)s","name":"%(name)s","msg":"%(message)s"}',
+    datefmt="%Y-%m-%dT%H:%M:%S",
+))
+_file_handler.setLevel(logging.INFO)
+logging.getLogger().addHandler(_file_handler)
+
+# Track pipeline start time for uptime calculation
+_boot_time = time.monotonic()
 
 # ── Global state ────────────────────────────────────────────────────────
 config: AquarelaConfig = AquarelaConfig.load()
@@ -774,6 +792,206 @@ async def health():
         "clients": len(ws_clients),
         "race_state": race_timer.state,
     }
+
+
+# ── Diagnostic endpoints (for remote support via Android app + Telegram) ──
+
+@app.get("/api/system/health")
+async def system_health():
+    """Comprehensive health report for remote diagnostics.
+
+    The Android app calls this, formats it as text, and the customer
+    shares it on Telegram so Claude can diagnose issues.
+    """
+    # CPU temperature (Raspberry Pi)
+    cpu_temp = None
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp") as f:
+            cpu_temp = round(int(f.read().strip()) / 1000, 1)
+    except (FileNotFoundError, ValueError):
+        pass
+
+    # Sensor ages from current state
+    sensor_ages = {
+        "heading": getattr(current_state, "heading_age_ms", None),
+        "wind": getattr(current_state, "wind_age_ms", None),
+        "bsp": getattr(current_state, "bsp_age_ms", None),
+        "depth": getattr(current_state, "depth_age_ms", None),
+    }
+
+    # Source status
+    source_status = {"can": "unknown"}
+    if active_source is not None:
+        source_type = type(active_source).__name__
+        source_status = {source_type: "running"}
+
+    # Error count from log file (last hour)
+    errors_last_hour = 0
+    try:
+        if _log_file.exists():
+            cutoff = time.time() - 3600
+            with open(_log_file) as f:
+                for line in f:
+                    if '"ERROR"' in line:
+                        errors_last_hour += 1
+    except Exception:
+        pass
+
+    return {
+        "boat_name": config.boat_name,
+        "uptime_s": round(time.monotonic() - _boot_time),
+        "source": config.source,
+        "source_status": source_status,
+        "sensor_ages_ms": sensor_ages,
+        "cpu_temp_c": cpu_temp,
+        "disk_free_mb": round(_disk_free_mb()),
+        "pipeline_hz": config.sample_rate_hz,
+        "session_active": session_manager.active_session is not None,
+        "ws_clients": len(ws_clients),
+        "csv_logging": csv_logger.is_open,
+        "errors_last_hour": errors_last_hour,
+        "version": await system_version(),
+    }
+
+
+@app.get("/api/system/logs")
+async def system_logs(lines: int = 50):
+    """Return last N lines from the structured log file.
+
+    The Android app shares this on Telegram for Claude to read.
+    """
+    if not _log_file.exists():
+        return {"lines": [], "total": 0}
+    try:
+        with open(_log_file, "r", encoding="utf-8") as f:
+            all_lines = f.readlines()
+        # Return last N lines, stripped
+        tail = [l.rstrip() for l in all_lines[-lines:]]
+        return {"lines": tail, "total": len(all_lines)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/system/can-dump")
+async def system_can_dump(payload: dict):
+    """Capture raw CAN bus frames for a specified duration.
+
+    Request: {"seconds": 30}  (default 10, max 60)
+
+    Returns a summary of all PGN types seen, their frequency,
+    source addresses, and sample data. Claude uses this to diagnose
+    missing or misbehaving sensors.
+    """
+    seconds = min(max(payload.get("seconds", 10), 1), 60)
+
+    # PGN name lookup
+    pgn_names = {
+        126992: "System Time", 127250: "Vessel Heading",
+        127257: "Attitude", 127258: "Magnetic Variation",
+        127508: "Battery Status", 128259: "Speed (Water)",
+        128267: "Water Depth", 128275: "Distance Log",
+        129025: "Position Rapid", 129026: "COG & SOG",
+        129029: "GNSS Position", 129540: "GNSS Satellites",
+        130306: "Wind Data", 130310: "Environmental",
+        130311: "Environmental 2",
+    }
+
+    if not config.source.startswith("can") and not config.source.startswith("vcan"):
+        # In simulator/interactive mode, return a mock response
+        return {
+            "duration_s": seconds,
+            "frames_total": 0,
+            "pgns_seen": {},
+            "unknown_pgns": {},
+            "source_addresses": {},
+            "note": f"Source is '{config.source}', not CAN — no raw frames available",
+        }
+
+    # Capture frames from the CAN bus for the specified duration
+    try:
+        import can as can_lib
+        from .nmea.source_can import extract_pgn
+
+        bus = await asyncio.to_thread(
+            can_lib.Bus, channel=config.source, interface="socketcan",
+        )
+
+        pgn_stats: dict = {}  # pgn -> {count, sources, sample_hex}
+        addr_counts: dict = {}  # source_addr -> frame_count
+        total = 0
+        end_time = time.monotonic() + seconds
+
+        def _capture():
+            nonlocal total
+            while time.monotonic() < end_time:
+                msg = bus.recv(timeout=0.5)
+                if msg is None or not msg.is_extended_id or msg.is_error_frame:
+                    continue
+                pgn, src = extract_pgn(msg.arbitration_id)
+                total += 1
+                addr_counts[src] = addr_counts.get(src, 0) + 1
+                if pgn not in pgn_stats:
+                    pgn_stats[pgn] = {
+                        "count": 0, "sources": set(),
+                        "sample_hex": msg.data.hex(" "),
+                    }
+                pgn_stats[pgn]["count"] += 1
+                pgn_stats[pgn]["sources"].add(src)
+            bus.shutdown()
+
+        await asyncio.to_thread(_capture)
+
+        # Format response
+        pgns_seen = {}
+        unknown_pgns = {}
+        for pgn, stats in pgn_stats.items():
+            entry = {
+                "count": stats["count"],
+                "sources": sorted(stats["sources"]),
+                "hz": round(stats["count"] / seconds, 1),
+                "sample_hex": stats["sample_hex"],
+            }
+            if pgn in pgn_names:
+                entry["desc"] = pgn_names[pgn]
+                pgns_seen[str(pgn)] = entry
+            else:
+                unknown_pgns[str(pgn)] = entry
+
+        return {
+            "duration_s": seconds,
+            "frames_total": total,
+            "pgns_seen": pgns_seen,
+            "unknown_pgns": unknown_pgns,
+            "source_addresses": {str(k): v for k, v in sorted(addr_counts.items())},
+        }
+    except Exception as e:
+        return {"error": str(e), "duration_s": seconds}
+
+
+@app.get("/api/system/ble-scan")
+async def system_ble_scan():
+    """Scan for BLE devices for 10 seconds.
+
+    Returns visible Bluetooth LE devices with name and RSSI.
+    Claude uses this to check if the Calypso wind sensor is visible.
+    """
+    try:
+        from bleak import BleakScanner
+        devices = await BleakScanner.discover(timeout=10.0)
+        return {
+            "devices": [
+                {
+                    "name": d.name or "Unknown",
+                    "mac": d.address,
+                    "rssi": d.rssi,
+                }
+                for d in sorted(devices, key=lambda d: d.rssi or -999, reverse=True)
+            ]
+        }
+    except ImportError:
+        return {"error": "bleak not installed — BLE scanning unavailable"}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.get("/api/source")

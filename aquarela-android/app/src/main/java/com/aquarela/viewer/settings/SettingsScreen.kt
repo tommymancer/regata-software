@@ -1,5 +1,6 @@
 package com.aquarela.viewer.settings
 
+import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.widget.Toast
@@ -15,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -206,6 +208,151 @@ fun SettingsScreen(piBaseUrl: String?) {
                 }
             }
         }
+
+        Spacer(Modifier.height(16.dp))
+
+        // Diagnostics section
+        var diagRunning by remember { mutableStateOf(false) }
+        var canDumpRunning by remember { mutableStateOf(false) }
+        var bleScanRunning by remember { mutableStateOf(false) }
+
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Diagnostica", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Condividi i report su Telegram per assistenza remota",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+
+                // Diagnostica button (health + logs)
+                Button(
+                    onClick = {
+                        if (piBaseUrl == null) {
+                            Toast.makeText(context, "Pi non connesso", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        diagRunning = true
+                        scope.launch {
+                            try {
+                                val report = withContext(Dispatchers.IO) {
+                                    val health = httpGet("$piBaseUrl/api/system/health")
+                                    val logs = httpGet("$piBaseUrl/api/system/logs?lines=20")
+                                    formatDiagReport(health, logs)
+                                }
+                                shareText(context, "Diagnostica Aquarela", report)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Errore: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                            diagRunning = false
+                        }
+                    },
+                    enabled = !diagRunning && piBaseUrl != null,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (diagRunning) {
+                        CircularProgressIndicator(
+                            Modifier.size(20.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text("Diagnostica")
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                // CAN Dump button
+                Button(
+                    onClick = {
+                        if (piBaseUrl == null) {
+                            Toast.makeText(context, "Pi non connesso", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        canDumpRunning = true
+                        scope.launch {
+                            try {
+                                val report = withContext(Dispatchers.IO) {
+                                    val json = httpPostJson(
+                                        "$piBaseUrl/api/system/can-dump",
+                                        """{"seconds":30}""",
+                                    )
+                                    formatCanDump(json)
+                                }
+                                shareText(context, "CAN Dump Aquarela", report)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Errore: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                            canDumpRunning = false
+                        }
+                    },
+                    enabled = !canDumpRunning && piBaseUrl != null,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    ),
+                ) {
+                    if (canDumpRunning) {
+                        CircularProgressIndicator(
+                            Modifier.size(20.dp),
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("CAN Dump (30s)...")
+                    } else {
+                        Text("CAN Dump")
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                // BLE Scan button
+                Button(
+                    onClick = {
+                        if (piBaseUrl == null) {
+                            Toast.makeText(context, "Pi non connesso", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        bleScanRunning = true
+                        scope.launch {
+                            try {
+                                val report = withContext(Dispatchers.IO) {
+                                    val json = httpGet("$piBaseUrl/api/system/ble-scan")
+                                    formatBleScan(json)
+                                }
+                                shareText(context, "BLE Scan Aquarela", report)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Errore: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                            bleScanRunning = false
+                        }
+                    },
+                    enabled = !bleScanRunning && piBaseUrl != null,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    ),
+                ) {
+                    if (bleScanRunning) {
+                        CircularProgressIndicator(
+                            Modifier.size(20.dp),
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("BLE Scan (10s)...")
+                    } else {
+                        Text("BLE Scan")
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -235,6 +382,23 @@ private fun downloadBytes(url: String): ByteArray {
     }
 }
 
+/** POST JSON string to URL, return response body. */
+private fun httpPostJson(url: String, jsonBody: String): String {
+    val conn = URL(url).openConnection() as HttpURLConnection
+    conn.connectTimeout = 10_000
+    conn.readTimeout = 60_000
+    conn.requestMethod = "POST"
+    conn.doOutput = true
+    conn.setRequestProperty("Content-Type", "application/json")
+    return try {
+        conn.outputStream.use { it.write(jsonBody.toByteArray()) }
+        if (conn.responseCode != 200) throw Exception("HTTP ${conn.responseCode}")
+        conn.inputStream.bufferedReader().readText()
+    } finally {
+        conn.disconnect()
+    }
+}
+
 /** POST raw bytes to URL, return response body. */
 private fun httpPostBytes(url: String, data: ByteArray): String {
     val conn = URL(url).openConnection() as HttpURLConnection
@@ -251,4 +415,152 @@ private fun httpPostBytes(url: String, data: ByteArray): String {
     } finally {
         conn.disconnect()
     }
+}
+
+// ── Diagnostic report formatters ──────────────────────────────────────
+
+/** Format health + logs into a readable text report for Telegram. */
+private fun formatDiagReport(healthJson: String, logsJson: String): String {
+    val h = JSONObject(healthJson)
+    val version = h.optJSONObject("version")
+    val sensors = h.optJSONObject("sensor_ages_ms")
+    val sb = StringBuilder()
+
+    sb.appendLine("AQUARELA DIAGNOSTICA")
+    sb.appendLine("====================")
+    sb.appendLine("Barca: ${h.optString("boat_name", "?")}")
+    sb.appendLine("Versione: ${version?.optString("sha", "?")} - ${version?.optString("message", "")}")
+    sb.appendLine("Uptime: ${h.optInt("uptime_s", 0) / 60} min")
+    sb.appendLine("Source: ${h.optString("source", "?")}")
+    sb.appendLine()
+
+    sb.appendLine("SENSORI (age ms):")
+    if (sensors != null) {
+        for (key in sensors.keys()) {
+            val age = sensors.optInt(key, -1)
+            val status = when {
+                age < 500 -> "OK"
+                age < 5000 -> "LENTO"
+                else -> "NON RISPONDE"
+            }
+            sb.appendLine("  $key: $age ms ($status)")
+        }
+    }
+    sb.appendLine()
+
+    sb.appendLine("SISTEMA:")
+    val cpuTemp = h.opt("cpu_temp_c")
+    if (cpuTemp != null && cpuTemp != JSONObject.NULL) sb.appendLine("  CPU: ${cpuTemp}C")
+    sb.appendLine("  Disco libero: ${h.optInt("disk_free_mb", 0)} MB")
+    sb.appendLine("  Pipeline: ${h.optInt("pipeline_hz", 0)} Hz")
+    sb.appendLine("  Sessione attiva: ${if (h.optBoolean("session_active")) "SI" else "NO"}")
+    sb.appendLine("  CSV logging: ${if (h.optBoolean("csv_logging")) "SI" else "NO"}")
+    sb.appendLine("  Errori ultima ora: ${h.optInt("errors_last_hour", 0)}")
+    sb.appendLine()
+
+    // Last few log lines
+    val logsObj = JSONObject(logsJson)
+    val lines = logsObj.optJSONArray("lines")
+    if (lines != null && lines.length() > 0) {
+        sb.appendLine("LOG (ultime ${lines.length()} righe):")
+        for (i in 0 until lines.length()) {
+            sb.appendLine("  ${lines.optString(i)}")
+        }
+    }
+
+    return sb.toString()
+}
+
+/** Format CAN dump into a readable text report. */
+private fun formatCanDump(json: String): String {
+    val obj = JSONObject(json)
+    val sb = StringBuilder()
+
+    sb.appendLine("AQUARELA CAN DUMP")
+    sb.appendLine("=================")
+    sb.appendLine("Durata: ${obj.optInt("duration_s")}s")
+    sb.appendLine("Frame totali: ${obj.optInt("frames_total")}")
+
+    val note = obj.optString("note", "")
+    if (note.isNotEmpty()) {
+        sb.appendLine(note)
+        return sb.toString()
+    }
+
+    val error = obj.optString("error", "")
+    if (error.isNotEmpty()) {
+        sb.appendLine("ERRORE: $error")
+        return sb.toString()
+    }
+
+    sb.appendLine()
+    sb.appendLine("PGN RICONOSCIUTI:")
+    val pgns = obj.optJSONObject("pgns_seen")
+    if (pgns != null) {
+        for (key in pgns.keys()) {
+            val p = pgns.getJSONObject(key)
+            sb.appendLine("  PGN $key (${p.optString("desc", "?")}): ${p.optInt("count")} frame, ${p.optDouble("hz", 0.0)} Hz, src=${p.optJSONArray("sources")}")
+        }
+    }
+
+    val unknown = obj.optJSONObject("unknown_pgns")
+    if (unknown != null && unknown.length() > 0) {
+        sb.appendLine()
+        sb.appendLine("PGN SCONOSCIUTI:")
+        for (key in unknown.keys()) {
+            val p = unknown.getJSONObject(key)
+            sb.appendLine("  PGN $key: ${p.optInt("count")} frame, src=${p.optJSONArray("sources")}")
+        }
+    }
+
+    val addrs = obj.optJSONObject("source_addresses")
+    if (addrs != null && addrs.length() > 0) {
+        sb.appendLine()
+        sb.appendLine("INDIRIZZI SORGENTE:")
+        for (key in addrs.keys()) {
+            sb.appendLine("  Addr $key: ${addrs.optInt(key)} frame")
+        }
+    }
+
+    return sb.toString()
+}
+
+/** Format BLE scan into a readable text report. */
+private fun formatBleScan(json: String): String {
+    val obj = JSONObject(json)
+    val sb = StringBuilder()
+
+    sb.appendLine("AQUARELA BLE SCAN")
+    sb.appendLine("=================")
+
+    val error = obj.optString("error", "")
+    if (error.isNotEmpty()) {
+        sb.appendLine("ERRORE: $error")
+        return sb.toString()
+    }
+
+    val devices = obj.optJSONArray("devices")
+    if (devices == null || devices.length() == 0) {
+        sb.appendLine("Nessun dispositivo BLE trovato")
+        return sb.toString()
+    }
+
+    sb.appendLine("${devices.length()} dispositivi trovati:")
+    sb.appendLine()
+    for (i in 0 until devices.length()) {
+        val d = devices.getJSONObject(i)
+        sb.appendLine("  ${d.optString("name", "?")} | ${d.optString("mac")} | RSSI: ${d.optInt("rssi")} dBm")
+    }
+
+    return sb.toString()
+}
+
+/** Open Android share sheet with text content. */
+private fun shareText(context: android.content.Context, subject: String, text: String) {
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, subject)
+        putExtra(Intent.EXTRA_TEXT, text)
+    }
+    context.startActivity(Intent.createChooser(intent, "Condividi diagnostica"))
 }

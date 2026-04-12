@@ -61,6 +61,9 @@ class AquarelaConfig:
         "performance", "race_timer", "trim", "system",
     ])
 
+    # Boat identity
+    boat_name: str = "Aquarela"      # human-readable name, shown in health endpoint
+
     # Data source
     source: str = "can0"         # "simulator", "interactive", or "can1"
     initial_twd: float = 180.0        # initial true wind direction (interactive mode)
@@ -119,6 +122,7 @@ class AquarelaConfig:
                 "upwind", "wind_rose", "downwind", "nav",
                 "performance", "race_timer", "trim", "system",
             ]),
+            boat_name=raw.get("boat_name", "Aquarela"),
             source=raw.get("source", "can0"),
             initial_twd=raw.get("initial_twd", 180.0),
             initial_tws=raw.get("initial_tws", 10.0),
@@ -159,6 +163,7 @@ class AquarelaConfig:
             "damping": self.damping,
             "theme": self.theme,
             "pages": self.pages,
+            "boat_name": self.boat_name,
             "source": self.source,
             "initial_twd": self.initial_twd,
             "initial_tws": self.initial_tws,
