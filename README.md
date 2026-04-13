@@ -147,7 +147,7 @@ Dashboard: `http://10.42.0.1:8080` (on boat) or `http://aquarela.local:8080` (vi
 
 ## Supported instruments
 
-Tested with Garmin marine electronics on a Beneteau First 27 (Nitro 80):
+Tested with Garmin marine electronics on a Nitro 80:
 - Garmin GNX 20/21 displays
 - Garmin gWind wireless wind sensor
 - Garmin GPS 24xd
