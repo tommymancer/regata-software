@@ -17,3 +17,7 @@ aquarela-android/build/
 aquarela-android/aquarela-release.jks
 aquarela-android/local.properties
 *.apk
+aquarela.egg-info/
+aquarela-android/.idea/
+Nmea files/
+Purchase/
