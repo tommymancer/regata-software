@@ -128,18 +128,29 @@ class CanSource(NmeaSource):
     # ── lifecycle ──────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Open the CAN bus interface."""
-        try:
-            self._bus = await asyncio.to_thread(
-                can.Bus, channel=self._interface, interface=self._bustype,
-            )
-            self._running = True
-            logger.info("CAN source started on %s (%s)",
-                        self._interface, self._bustype)
-        except can.CanError as exc:
-            logger.error("Failed to open CAN interface %s: %s",
-                         self._interface, exc)
-            raise
+        """Open the CAN bus interface, retrying on failure."""
+        max_retries = 60  # try for up to ~5 minutes
+        for attempt in range(max_retries):
+            try:
+                self._bus = await asyncio.to_thread(
+                    can.Bus, channel=self._interface, interface=self._bustype,
+                )
+                self._running = True
+                if attempt > 0:
+                    logger.info("CAN source connected on attempt %d", attempt + 1)
+                logger.info("CAN source started on %s (%s)",
+                            self._interface, self._bustype)
+                return
+            except (can.CanError, OSError) as exc:
+                if attempt == 0:
+                    logger.warning("CAN interface %s not available: %s — retrying",
+                                   self._interface, exc)
+                await asyncio.sleep(5)
+        # All retries exhausted
+        logger.error("CAN interface %s not available after %d attempts — "
+                     "running without CAN (dashboard will show no sensor data)",
+                     self._interface, max_retries)
+        self._running = False
 
     async def stop(self) -> None:
         """Shut down the CAN bus."""
@@ -162,7 +173,20 @@ class CanSource(NmeaSource):
         the event loop responsive and allows clean shutdown.
         """
         if self._bus is None:
-            raise RuntimeError("CAN source not started — call start() first")
+            # CAN not available — yield nothing, keep server alive
+            logger.warning("CAN bus not connected — waiting for reconnect")
+            while self._running:
+                await asyncio.sleep(5)
+                try:
+                    self._bus = await asyncio.to_thread(
+                        can.Bus, channel=self._interface, interface=self._bustype,
+                    )
+                    logger.info("CAN bus reconnected on %s", self._interface)
+                    break
+                except (can.CanError, OSError):
+                    continue
+            if self._bus is None:
+                return
 
         while self._running:
             # ── read one CAN frame (non-blocking via thread) ──
