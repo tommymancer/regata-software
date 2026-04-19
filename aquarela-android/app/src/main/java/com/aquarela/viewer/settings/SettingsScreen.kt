@@ -4,9 +4,12 @@ import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,8 +30,18 @@ private const val GITHUB_TARBALL =
 private const val GITHUB_COMMITS =
     "https://api.github.com/repos/tommymancer/regata-software/commits/master"
 
+private val TOOL_PAGES = listOf(
+    "course_setup"  to "Campo di Regata",
+    "sensors"       to "Sensori",
+    "calibration"   to "Calibrazione",
+    "trim"          to "Trim Book",
+    "trim_guide"    to "Trim Guide",
+    "polar_diagram" to "Polar Diagram",
+    "system"        to "Sistema",
+)
+
 @Composable
-fun SettingsScreen(piBaseUrl: String?) {
+fun SettingsScreen(piBaseUrl: String?, onNavigateToTool: (page: String) -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -349,6 +362,50 @@ fun SettingsScreen(piBaseUrl: String?) {
                         Text("BLE Scan (10s)...")
                     } else {
                         Text("BLE Scan")
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // Tools section — opens Svelte tool pages in a WebView via hash routing
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Strumenti", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Calibrazione, polar, trim e altri strumenti",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+
+                TOOL_PAGES.forEachIndexed { index, (page, label) ->
+                    if (index > 0) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = piBaseUrl != null) { onNavigateToTool(page) }
+                            .padding(vertical = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (piBaseUrl != null)
+                                MaterialTheme.colorScheme.onSurface
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }

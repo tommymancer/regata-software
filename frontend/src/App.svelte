@@ -105,8 +105,29 @@
     }
   }
 
-  onMount(() => { connect(); startHistory(); });
-  onDestroy(() => { disconnect(); stopHistory(); });
+  // Hash routing — Android native nav opens tool pages via #calibration etc.
+  let hashHandler;
+
+  onMount(() => {
+    connect();
+    startHistory();
+
+    hashHandler = () => {
+      const hash = window.location.hash.replace('#', '');
+      const validPages = menuItems.map(m => m.name);
+      if (hash && validPages.includes(hash)) {
+        menuPage = hash;
+      }
+    };
+    hashHandler();
+    window.addEventListener('hashchange', hashHandler);
+  });
+
+  onDestroy(() => {
+    disconnect();
+    stopHistory();
+    if (hashHandler) window.removeEventListener('hashchange', hashHandler);
+  });
 </script>
 
 <svelte:window on:keydown={handleKey} />

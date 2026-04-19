@@ -20,6 +20,7 @@ import com.aquarela.viewer.live.LiveTab
 import com.aquarela.viewer.sessions.SessionDetailScreen
 import com.aquarela.viewer.sessions.SessionListScreen
 import com.aquarela.viewer.settings.SettingsScreen
+import com.aquarela.viewer.settings.ToolPageScreen
 import com.aquarela.viewer.sync.SyncManager
 import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
@@ -102,7 +103,25 @@ class MainActivity : ComponentActivity() {
                     SessionDetailScreen(sessionId = id, piBaseUrl = piBaseUrl, onBack = { navController.popBackStack() })
                 }
                 composable("settings") {
-                    SettingsScreen(piBaseUrl = piBaseUrl)
+                    SettingsScreen(
+                        piBaseUrl = piBaseUrl,
+                        onNavigateToTool = { page ->
+                            navController.navigate("tool/$page")
+                        },
+                    )
+                }
+                composable(
+                    "tool/{page}",
+                    arguments = listOf(navArgument("page") { type = NavType.StringType }),
+                ) { backStack ->
+                    val page = backStack.arguments!!.getString("page")!!
+                    if (piBaseUrl != null) {
+                        ToolPageScreen(
+                            piBaseUrl = piBaseUrl!!,
+                            pageName = page,
+                            onBack = { navController.popBackStack() },
+                        )
+                    }
                 }
             }
         }
