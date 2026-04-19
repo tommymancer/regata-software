@@ -1,5 +1,8 @@
 <!--
-  PageCarousel — Swipe/arrow-key page navigator.
+  PageCarousel — 3-page swipe navigator with labeled dot indicators.
+
+  Design: START · RACE · TACTICS — active page shows elongated pill + label.
+  Dots sit at the bottom of the carousel, above the bottom nav.
 
   Props:
     pages     : Array<{name, label}>  — page definitions
@@ -41,16 +44,21 @@
     <slot />
   </div>
 
-  <div class="dots">
+  <div class="pager">
     {#each pages as page, i}
       <button
-        class="dot"
+        class="pager-item"
         class:active={i === current}
         on:click={() => current = i}
         role="tab"
         aria-selected={i === current}
         aria-label={page.label}
-      ></button>
+      >
+        <span class="pager-dot" class:active={i === current}></span>
+        {#if i === current}
+          <span class="pager-label">{page.label}</span>
+        {/if}
+      </button>
     {/each}
   </div>
 </div>
@@ -67,34 +75,46 @@
     flex: 1;
     overflow: hidden;
   }
-  .dots {
+  .pager {
     display: flex;
     justify-content: center;
-    gap: 8px;
-    padding: 6px 0;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
     flex-shrink: 0;
+    pointer-events: auto;
   }
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    border: 1px solid var(--text-dim);
-    background: transparent;
-    opacity: 0.35;
+  .pager-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: none;
+    border: none;
+    padding: 4px;
     cursor: pointer;
-    padding: 0;
-    transition: all 0.25s ease;
+    touch-action: manipulation;
+    opacity: 0.35;
+    transition: opacity 0.2s;
   }
-  .dot.active {
+  .pager-item.active {
     opacity: 1;
-    background: var(--accent);
-    border-color: var(--accent);
-    box-shadow: 0 0 8px var(--accent);
-    transform: scale(1.2);
   }
-
-  @media (max-width: 480px) {
-    .dots { gap: 6px; padding: 4px 0; }
-    .dot { width: 7px; height: 7px; }
+  .pager-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--text-dim);
+    transition: all 0.2s;
+  }
+  .pager-dot.active {
+    width: 18px;
+    background: var(--accent);
+  }
+  .pager-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 800;
+    color: var(--accent);
+    letter-spacing: 1.5px;
   }
 </style>

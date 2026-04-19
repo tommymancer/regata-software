@@ -1,38 +1,43 @@
 <!--
-  App.svelte — Root component.
+  App.svelte — Root component (redesigned).
 
   - Connects WebSocket on mount
-  - Provides theme CSS variables (night / sun / red-night)
-  - Page carousel with swipe + keyboard navigation
+  - Provides theme CSS variables (Notte / Giorno / Sole)
+  - 3-page race carousel: START → RACE → TACTICS
+  - Settings as a dedicated tab
+  - Menu for tools/utilities
 -->
 <script>
   import { onMount, onDestroy } from "svelte";
   import { connect, disconnect, connectionStatus } from "./stores/boat.js";
   import { startHistory, stopHistory } from "./stores/history.js";
   import PageCarousel from "./components/PageCarousel.svelte";
-  import StatusBar from "./components/StatusBar.svelte";
-  import RegattaPage from "./pages/RegattaPage.svelte";
-  import RaceTimerPage from "./pages/RaceTimerPage.svelte";
+  import PageStart from "./pages/PageStart.svelte";
+  import PageRace from "./pages/PageRace.svelte";
+  import PageTactics from "./pages/PageTactics.svelte";
+  import PageSettings from "./pages/PageSettings.svelte";
+
+  // Legacy pages — accessible from menu
   import TrimPage from "./pages/TrimPage.svelte";
-  import CourseSetupPage from "./pages/CourseSetupPage.svelte";
-  import MapPage from "./pages/MapPage.svelte";
-  import SensorsPage from "./pages/SensorsPage.svelte";
-  import SystemPage from "./pages/SystemPage.svelte";
   import CalibrationPage from "./pages/CalibrationPage.svelte";
   import TrimGuidePage from "./pages/TrimGuidePage.svelte";
   import PolarDiagramPage from "./pages/PolarDiagramPage.svelte";
+  import SystemPage from "./pages/SystemPage.svelte";
+  import CourseSetupPage from "./pages/CourseSetupPage.svelte";
+  import SensorsPage from "./pages/SensorsPage.svelte";
 
-  // Carousel: pages you swipe through while sailing
+  // Carousel: 3 pages matching the race arc
   const pages = [
-    { name: "course_setup", label: "Course Setup" },
-    { name: "race_timer",  label: "Race Timer" },
-    { name: "regatta",     label: "Regatta" },
-    { name: "map",         label: "Map" },
-    { name: "sensors",     label: "Sensors" },
+    { name: "start",   label: "START" },
+    { name: "race",    label: "RACE" },
+    { name: "tactics", label: "TACTICS" },
   ];
 
-  // Menu: settings/tools accessed via hamburger menu
+  // Menu: tools/utilities accessed via hamburger menu
   const menuItems = [
+    { name: "settings",       label: "Impostazioni",    icon: "⚙" },
+    { name: "course_setup",   label: "Campo di Regata", icon: "◎" },
+    { name: "sensors",        label: "Sensori",         icon: "▤" },
     { name: "calibration",    label: "Calibrazione",    icon: "◎" },
     { name: "trim",           label: "Trim Book",       icon: "▤" },
     { name: "trim_guide",     label: "Trim Guide",      icon: "▧" },
@@ -40,10 +45,10 @@
     { name: "system",         label: "Sistema",         icon: "⚙" },
   ];
 
-  let currentPage = 1; // Start on Race Timer; Course Setup is page 0 (swipe left)
+  let currentPage = 1; // Start on RACE
   let menuOpen = false;
   let menuPage = null; // null = carousel visible, string = menu page name
-  let theme = "night";
+  let theme = "dark";
 
   function openMenu() { menuOpen = true; }
   function closeMenu() { menuOpen = false; }
@@ -53,18 +58,24 @@
   }
   function backToCarousel() { menuPage = null; }
 
-  const themes = ["night", "sun", "red-night"];
+  const themes = ["dark", "light", "sun"];
+  const themeLabels = { dark: "Notte", light: "Giorno", sun: "Sole" };
+  const themeIcons = { dark: "☾", light: "☀", sun: "◉" };
 
   function cycleTheme() {
     const idx = themes.indexOf(theme);
     theme = themes[(idx + 1) % themes.length];
   }
 
+  // Allow setting theme from child components (e.g., PageSettings)
+  function setTheme(t) {
+    if (themes.includes(t)) theme = t;
+  }
+
   // Keyboard simulator controls:
-  //   A/D  = helm ±5°
-  //   W/S  = TWS ±2 kt (more / less wind)
+  //   A/D  = helm +/-5 deg
+  //   W/S  = TWS +/-2 kt
   function handleKey(e) {
-    // Don't fire simulator controls when typing in form fields
     const tag = e.target.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
     if (e.key === "a" || e.key === "A") {
@@ -101,26 +112,15 @@
 <svelte:window on:keydown={handleKey} />
 
 <div class="app" data-theme={theme}>
-  {#if $connectionStatus !== "connected"}
-    <div class="conn-banner" class:connecting={$connectionStatus === "connecting"}>
-      <span class="conn-icon">{$connectionStatus === "connecting" ? "◌" : "✕"}</span>
-      {$connectionStatus === "connecting" ? "Connessione…" : "Disconnesso — riprovo…"}
-    </div>
-  {/if}
-
   {#if menuPage === null}
-    <!-- Main carousel -->
+    <!-- Main 3-page carousel -->
     <PageCarousel {pages} bind:current={currentPage}>
-      {#if pages[currentPage].name === "course_setup"}
-        <CourseSetupPage />
-      {:else if pages[currentPage].name === "regatta"}
-        <RegattaPage />
-      {:else if pages[currentPage].name === "race_timer"}
-        <RaceTimerPage />
-      {:else if pages[currentPage].name === "map"}
-        <MapPage />
-      {:else if pages[currentPage].name === "sensors"}
-        <SensorsPage />
+      {#if pages[currentPage].name === "start"}
+        <PageStart />
+      {:else if pages[currentPage].name === "race"}
+        <PageRace />
+      {:else if pages[currentPage].name === "tactics"}
+        <PageTactics />
       {/if}
     </PageCarousel>
   {:else}
@@ -131,7 +131,13 @@
         <span class="back-label">{menuItems.find(m => m.name === menuPage)?.label ?? ""}</span>
       </button>
       <div class="menu-page-content">
-        {#if menuPage === "calibration"}
+        {#if menuPage === "settings"}
+          <PageSettings {theme} on:theme={(e) => setTheme(e.detail)} />
+        {:else if menuPage === "course_setup"}
+          <CourseSetupPage />
+        {:else if menuPage === "sensors"}
+          <SensorsPage />
+        {:else if menuPage === "calibration"}
           <CalibrationPage />
         {:else if menuPage === "trim"}
           <TrimPage />
@@ -146,7 +152,23 @@
     </div>
   {/if}
 
-  <StatusBar on:menu={openMenu} />
+  <!-- Bottom nav: Live / Sessions / Settings -->
+  <nav class="bottom-nav">
+    <button class="nav-btn" class:active={menuPage === null}
+            on:click={backToCarousel}>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      <span>Live</span>
+    </button>
+    <button class="nav-btn" on:click={openMenu}>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      <span>Menu</span>
+    </button>
+    <button class="nav-btn" class:active={menuPage === "settings"}
+            on:click={() => goToMenuPage("settings")}>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      <span>Impostazioni</span>
+    </button>
+  </nav>
 
   <!-- Menu overlay -->
   {#if menuOpen}
@@ -154,21 +176,22 @@
       <nav class="menu-panel" on:click|stopPropagation>
         <div class="menu-header">MENU</div>
         {#each menuItems as item}
-          <button class="menu-item" on:click={() => goToMenuPage(item.name)}
-                  class:active={menuPage === item.name}>
-            <span class="menu-icon">{item.icon}</span>
-            <span class="menu-label">{item.label}</span>
-          </button>
+          {#if item.name !== "settings"}
+            <button class="menu-item" on:click={() => goToMenuPage(item.name)}
+                    class:active={menuPage === item.name}>
+              <span class="menu-icon">{item.icon}</span>
+              <span class="menu-label">{item.label}</span>
+            </button>
+          {/if}
         {/each}
         <div class="menu-divider"></div>
         <button class="menu-item theme-item" on:click={cycleTheme}>
-          <span class="menu-icon">{theme === "night" ? "☾" : theme === "sun" ? "☀" : "◉"}</span>
-          <span class="menu-label">Tema: {theme === "night" ? "Notte" : theme === "sun" ? "Giorno" : "Rosso"}</span>
+          <span class="menu-icon">{themeIcons[theme]}</span>
+          <span class="menu-label">Tema: {themeLabels[theme]}</span>
         </button>
       </nav>
     </div>
   {/if}
-
 </div>
 
 <style>
@@ -181,75 +204,98 @@
   :global(body) {
     margin: 0;
     overflow: hidden;
-    font-family: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-family: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* ── Night theme (default) — deep ocean cockpit ──────────── */
-  .app[data-theme="night"] {
-    --bg:        #050e1a;
-    --card:      #0b1726;
-    --card-glow: #0d1d33;
-    --border:    #152742;
-    --text:      #e4ecf7;
-    --text-dim:  #3d6a8e;
-    --accent:    #00d4ff;
-    --green:     #00e676;
-    --orange:    #ffab00;
-    --red:       #ff1744;
-    --port:      #ff1744;
-    --stbd:      #00e676;
-    --glow-text: 0 0 20px rgba(228, 236, 247, 0.15);
-    --glow-accent: 0 0 24px rgba(0, 212, 255, 0.25);
-    --glow-green: 0 0 20px rgba(0, 230, 118, 0.3);
-    --glow-red:  0 0 20px rgba(255, 23, 68, 0.3);
-    --glow-orange: 0 0 20px rgba(255, 171, 0, 0.3);
-    --scanline:  rgba(255, 255, 255, 0.012);
+  @keyframes aqpulse {
+    0% { transform: scale(0.5); opacity: 0.8; }
+    100% { transform: scale(1.4); opacity: 0; }
   }
 
-  /* ── Sun theme (maximum contrast for direct sunlight) ──────── */
+  /* ── Notte theme (default) — dark instrument cockpit ──────── */
+  .app[data-theme="dark"] {
+    --bg:           #06090c;
+    --surface:      #0e1318;
+    --surface-alt:  #151b22;
+    --card:         #0e1318;
+    --card-glow:    #151b22;
+    --border:       rgba(255,255,255,0.08);
+    --border-strong: rgba(255,255,255,0.18);
+    --text:         #e8eef4;
+    --text-dim:     #7a8a99;
+    --text-faint:   #4a5866;
+    --accent:       #4fa8d8;
+    --accent-strong: #7cc3e8;
+    --green:        #3fbf7f;
+    --orange:       #f2b84b;
+    --red:          #e86a5a;
+    --wind:         #4fa8d8;
+    --port:         #e04848;
+    --stbd:         #3fbf7f;
+    --glow-text:    0 0 20px rgba(232, 238, 244, 0.1);
+    --glow-accent:  0 0 24px rgba(79, 168, 216, 0.2);
+    --glow-green:   0 0 20px rgba(63, 191, 127, 0.25);
+    --glow-red:     0 0 20px rgba(232, 106, 90, 0.25);
+    --glow-orange:  0 0 20px rgba(242, 184, 75, 0.25);
+    --scanline:     rgba(255, 255, 255, 0.008);
+  }
+
+  /* ── Giorno theme (light, daytime) ───────────────────────── */
+  .app[data-theme="light"] {
+    --bg:           #f5f6f7;
+    --surface:      #ffffff;
+    --surface-alt:  #eef0f2;
+    --card:         #ffffff;
+    --card-glow:    #eef0f2;
+    --border:       rgba(10,20,30,0.08);
+    --border-strong: rgba(10,20,30,0.22);
+    --text:         #0a1420;
+    --text-dim:     #5a6674;
+    --text-faint:   #8a96a4;
+    --accent:       #0c63a6;
+    --accent-strong: #084a80;
+    --green:        #1a8a52;
+    --orange:       #c47a0c;
+    --red:          #c43a2a;
+    --wind:         #0c63a6;
+    --port:         #c43a2a;
+    --stbd:         #1a8a52;
+    --glow-text:    none;
+    --glow-accent:  none;
+    --glow-green:   none;
+    --glow-red:     none;
+    --glow-orange:  none;
+    --scanline:     transparent;
+  }
+
+  /* ── Sole theme (high-contrast, direct sunlight) ─────────── */
   .app[data-theme="sun"] {
-    --bg:        #000000;
-    --card:      #080808;
-    --card-glow: #101010;
-    --border:    #1a1a1a;
-    --text:      #ffffff;
-    --text-dim:  #888888;
-    --accent:    #ffd000;
-    --green:     #00ff66;
-    --orange:    #ffaa00;
-    --red:       #ff3333;
-    --port:      #ff3333;
-    --stbd:      #00ff66;
-    --glow-text: 0 0 12px rgba(255, 255, 255, 0.2);
-    --glow-accent: 0 0 20px rgba(255, 208, 0, 0.3);
-    --glow-green: 0 0 16px rgba(0, 255, 102, 0.35);
-    --glow-red:  0 0 16px rgba(255, 51, 51, 0.35);
-    --glow-orange: 0 0 16px rgba(255, 170, 0, 0.35);
-    --scanline:  rgba(255, 255, 255, 0.008);
-  }
-
-  /* ── Red-night theme (preserves night vision) ────────────── */
-  .app[data-theme="red-night"] {
-    --bg:        #0c0404;
-    --card:      #180808;
-    --card-glow: #200c0c;
-    --border:    #2a1010;
-    --text:      #ff6b6b;
-    --text-dim:  #802020;
-    --accent:    #ff4444;
-    --green:     #ff6b6b;
-    --orange:    #ff8844;
-    --red:       #ff4444;
-    --port:      #ff4444;
-    --stbd:      #ff8844;
-    --glow-text: 0 0 16px rgba(255, 68, 68, 0.2);
-    --glow-accent: 0 0 20px rgba(255, 68, 68, 0.3);
-    --glow-green: 0 0 16px rgba(255, 107, 107, 0.3);
-    --glow-red:  0 0 16px rgba(255, 68, 68, 0.3);
-    --glow-orange: 0 0 16px rgba(255, 136, 68, 0.3);
-    --scanline:  rgba(255, 0, 0, 0.015);
+    --bg:           #fffef4;
+    --surface:      #ffffff;
+    --surface-alt:  #fff8d8;
+    --card:         #ffffff;
+    --card-glow:    #fff8d8;
+    --border:       #000000;
+    --border-strong: #000000;
+    --text:         #000000;
+    --text-dim:     #000000;
+    --text-faint:   #3a3a3a;
+    --accent:       #000000;
+    --accent-strong: #000000;
+    --green:        #006b2f;
+    --orange:       #8a4800;
+    --red:          #a81500;
+    --wind:         #000000;
+    --port:         #a81500;
+    --stbd:         #006b2f;
+    --glow-text:    none;
+    --glow-accent:  none;
+    --glow-green:   none;
+    --glow-red:     none;
+    --glow-orange:  none;
+    --scanline:     transparent;
   }
 
   .app {
@@ -263,7 +309,12 @@
     user-select: none;
     position: relative;
 
-    /* Spacing tokens — hybrid */
+    /* Font stacks */
+    --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    --font-numeric: "Barlow", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --font-text: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+
+    /* Spacing tokens */
     --gap-compact: 6px;
     --gap-airy: 12px;
     --pad-compact: 4px;
@@ -281,7 +332,7 @@
     --label-md-spacing: 0.12em;
   }
 
-  /* Subtle scan-line overlay for cockpit instrument feel */
+  /* Subtle scan-line overlay for cockpit feel (only on dark themes) */
   .app::after {
     content: "";
     position: absolute;
@@ -301,10 +352,38 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    padding: var(--pad-airy);
-    gap: var(--gap-airy);
     overflow-y: auto;
   }
+
+  /* ── Bottom navigation bar ──────────────────────────── */
+  .bottom-nav {
+    display: flex;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+    z-index: 10;
+  }
+  .nav-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 0 4px;
+    background: none;
+    border: none;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .nav-btn.active {
+    color: var(--accent);
+  }
+  .nav-btn:active { opacity: 0.6; }
 
   /* ── Menu page wrapper (back button + content) ───────────── */
   .menu-page-wrapper {
@@ -318,10 +397,11 @@
     align-items: center;
     gap: 6px;
     padding: 8px 12px;
-    background: var(--card);
+    background: var(--surface);
     border: none;
     border-bottom: 1px solid var(--border);
     color: var(--accent);
+    font-family: var(--font-text);
     font-size: 14px;
     font-weight: 700;
     cursor: pointer;
@@ -334,6 +414,7 @@
     line-height: 1;
   }
   .back-label {
+    font-family: var(--font-mono);
     font-size: 12px;
     letter-spacing: 0.1em;
     text-transform: uppercase;
@@ -347,7 +428,7 @@
   .menu-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(0, 0, 0, 0.55);
     z-index: 50;
     display: flex;
     justify-content: flex-end;
@@ -356,10 +437,10 @@
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
   .menu-panel {
-    width: 240px;
+    width: 260px;
     max-width: 75vw;
     height: 100%;
-    background: var(--card);
+    background: var(--surface);
     border-left: 1px solid var(--border);
     display: flex;
     flex-direction: column;
@@ -370,11 +451,11 @@
   @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
 
   .menu-header {
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 0.2em;
-    color: var(--accent);
-    text-shadow: var(--glow-accent);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--text-dim);
     padding: 20px 20px 12px;
   }
   .menu-item {
@@ -385,17 +466,17 @@
     background: none;
     border: none;
     color: var(--text);
+    font-family: var(--font-text);
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 500;
     cursor: pointer;
     touch-action: manipulation;
     text-align: left;
     transition: background 0.15s;
   }
-  .menu-item:active { background: var(--border); }
+  .menu-item:active { background: var(--surface-alt); }
   .menu-item.active {
     color: var(--accent);
-    background: rgba(0, 212, 255, 0.06);
   }
   .menu-icon {
     font-size: 18px;
@@ -405,7 +486,7 @@
   }
   .menu-item.active .menu-icon { color: var(--accent); }
   .menu-label {
-    letter-spacing: 0.03em;
+    letter-spacing: 0.02em;
   }
   .menu-divider {
     height: 1px;
@@ -417,42 +498,17 @@
     font-size: 13px;
   }
 
-  .conn-banner {
-    background: var(--red);
-    color: #fff;
-    text-align: center;
-    padding: 6px 12px;
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-  }
-
-  .conn-banner.connecting {
-    background: var(--orange);
-    color: #000;
-  }
-
-  .conn-icon {
-    font-size: 16px;
-  }
-
   /* ── Global typography for instrument values ──────────────── */
   :global(.instrument-value) {
-    font-family: "SF Mono", "Menlo", "Cascadia Mono", monospace;
+    font-family: var(--font-numeric);
     font-weight: 700;
     color: var(--text);
-    text-shadow: var(--glow-text);
     line-height: 1;
   }
 
   /* ── Global card style ─────────────────────────────────────── */
   :global(.instrument-card) {
-    background: linear-gradient(180deg, var(--card-glow) 0%, var(--card) 100%);
+    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 6px;
   }
