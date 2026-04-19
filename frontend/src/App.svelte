@@ -152,24 +152,6 @@
     </div>
   {/if}
 
-  <!-- Bottom nav: Live / Sessions / Settings -->
-  <nav class="bottom-nav">
-    <button class="nav-btn" class:active={menuPage === null}
-            on:click={backToCarousel}>
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-      <span>Live</span>
-    </button>
-    <button class="nav-btn" on:click={openMenu}>
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-      <span>Menu</span>
-    </button>
-    <button class="nav-btn" class:active={menuPage === "settings"}
-            on:click={() => goToMenuPage("settings")}>
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
-      <span>Impostazioni</span>
-    </button>
-  </nav>
-
   <!-- Menu overlay -->
   {#if menuOpen}
     <div class="menu-overlay" on:click={closeMenu}>
@@ -354,36 +336,6 @@
     height: 100%;
     overflow-y: auto;
   }
-
-  /* ── Bottom navigation bar ──────────────────────────── */
-  .bottom-nav {
-    display: flex;
-    border-top: 1px solid var(--border);
-    background: var(--surface);
-    flex-shrink: 0;
-    z-index: 10;
-  }
-  .nav-btn {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    padding: 6px 0 4px;
-    background: none;
-    border: none;
-    color: var(--text-faint);
-    font-family: var(--font-mono);
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    cursor: pointer;
-    touch-action: manipulation;
-  }
-  .nav-btn.active {
-    color: var(--accent);
-  }
-  .nav-btn:active { opacity: 0.6; }
 
   /* ── Menu page wrapper (back button + content) ───────────── */
   .menu-page-wrapper {
