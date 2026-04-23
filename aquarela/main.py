@@ -195,15 +195,29 @@ def _state_to_json(state: BoatState) -> str:
 
 
 async def _broadcast(message: str) -> None:
-    """Send message to all connected WebSocket clients."""
+    """Send message to all connected WebSocket clients.
+
+    Each client gets a short per-send timeout: a client stuck on backpressure
+    (bad WiFi, background tab) won't stall broadcasts to the others. A client
+    that errors or times out is dropped from the set.
+    """
     if not ws_clients:
         return
+    clients = list(ws_clients)
+
+    async def _send_one(ws):
+        try:
+            await asyncio.wait_for(ws.send_text(message), timeout=0.5)
+        except (asyncio.TimeoutError, Exception):
+            return "drop"
+        return None
+
     results = await asyncio.gather(
-        *(ws.send_text(message) for ws in list(ws_clients)),
+        *(_send_one(ws) for ws in clients),
         return_exceptions=True,
     )
-    for ws, result in zip(list(ws_clients), results):
-        if isinstance(result, Exception):
+    for ws, result in zip(clients, results):
+        if result == "drop" or isinstance(result, Exception):
             ws_clients.discard(ws)
 
 
@@ -235,6 +249,11 @@ async def _pipeline_loop(source: NmeaSource) -> None:
             128267: "depth_age_ms",
         }
         _last_seen: dict[int, float] = {}
+        # Consecutive error counter: if every step fails we escalate so the
+        # lifespan manager can restart the pipeline rather than spamming logs
+        # forever with garbage state. Resets on every successful step.
+        _consecutive_errors = 0
+        _MAX_CONSECUTIVE_ERRORS = 50
 
         async for pgn, data in source.stream():
             try:
@@ -485,9 +504,11 @@ async def _pipeline_loop(source: NmeaSource) -> None:
                             session_id=session_manager.active_session.id,
                         )
 
-                    # CSV: only log while sailing and disk OK
+                    # CSV: only log while sailing and disk OK.
+                    # Use async variant so fsync runs in a worker thread and
+                    # doesn't stall the pipeline on slow SD cards.
                     if _is_sailing and _disk_ok:
-                        csv_logger.log(state)
+                        await csv_logger.log_async(state)
 
                     # Broadcast to WebSocket clients
                     ws_tick += 1
@@ -497,9 +518,20 @@ async def _pipeline_loop(source: NmeaSource) -> None:
                             await _broadcast(_state_to_json(state))
 
                     current_state = state
+                # Step completed cleanly — reset the error streak.
+                _consecutive_errors = 0
 
             except Exception:
-                logger.exception("Pipeline step error (PGN %d)", pgn)
+                _consecutive_errors += 1
+                logger.exception(
+                    "Pipeline step error (PGN %d, streak=%d)",
+                    pgn, _consecutive_errors,
+                )
+                if _consecutive_errors >= _MAX_CONSECUTIVE_ERRORS:
+                    raise RuntimeError(
+                        f"Pipeline failed {_consecutive_errors} steps in a row — "
+                        "aborting loop so the lifespan manager can restart it"
+                    )
     except asyncio.CancelledError:
         logger.info("Pipeline cancelled")
     except Exception:
@@ -1256,7 +1288,21 @@ async def system_update(request: Request):
             tar_path.write_bytes(body)
 
             with tarfile.open(tar_path, "r:gz") as tar:
-                tar.extractall(tmp)
+                # Defense-in-depth: reject any member whose resolved path
+                # escapes the tmp dir (symlink / `../` path-traversal guard).
+                tmp_abs = Path(tmp).resolve()
+                safe_members = []
+                for m in tar.getmembers():
+                    target = (tmp_abs / m.name).resolve()
+                    if tmp_abs not in target.parents and target != tmp_abs:
+                        logger.warning("Rejecting unsafe tar member: %s", m.name)
+                        continue
+                    # Strip symlinks too — we don't need them for code sync
+                    if m.issym() or m.islnk():
+                        logger.warning("Rejecting symlink tar member: %s", m.name)
+                        continue
+                    safe_members.append(m)
+                tar.extractall(tmp, members=safe_members)
 
             # GitHub tarballs have a top-level dir like "user-repo-sha/"
             subdirs = [d for d in Path(tmp).iterdir() if d.is_dir()]

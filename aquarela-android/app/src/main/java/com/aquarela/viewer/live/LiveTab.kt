@@ -65,33 +65,41 @@ fun LiveTab(onPiFound: (String) -> Unit) {
             setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
                 val filename = URLUtil.guessFileName(url, contentDisposition, mimeType)
                 Toast.makeText(context, "Downloading $filename…", Toast.LENGTH_SHORT).show()
+                // Use applicationContext in the worker so we never hold the
+                // Activity alive past navigation/rotation.
+                val appCtx = context.applicationContext
+                val activity = context as? android.app.Activity
                 thread(name = "aquarela-download") {
+                    var conn: HttpURLConnection? = null
                     try {
-                        val conn = URL(url).openConnection() as HttpURLConnection
-                        conn.setRequestProperty("User-Agent", userAgent)
-                        conn.connectTimeout = 10_000
-                        conn.readTimeout = 30_000
+                        conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                            setRequestProperty("User-Agent", userAgent)
+                            connectTimeout = 10_000
+                            readTimeout = 30_000
+                        }
                         conn.connect()
                         if (conn.responseCode != 200) throw Exception("HTTP ${conn.responseCode}")
                         val bytes = conn.inputStream.use { it.readBytes() }
-                        conn.disconnect()
                         val values = ContentValues().apply {
                             put(MediaStore.Downloads.DISPLAY_NAME, filename)
                             put(MediaStore.Downloads.MIME_TYPE, mimeType ?: "text/csv")
                             put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                         }
-                        val uri = context.contentResolver.insert(
+                        val uri = appCtx.contentResolver.insert(
                             MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
                         ) ?: throw Exception("Failed to create file in Downloads")
-                        context.contentResolver.openOutputStream(uri)!!.use { it.write(bytes) }
-                        (context as? android.app.Activity)?.runOnUiThread {
-                            Toast.makeText(context, "$filename saved to Downloads", Toast.LENGTH_SHORT).show()
+                        appCtx.contentResolver.openOutputStream(uri)!!.use { it.write(bytes) }
+                        activity?.runOnUiThread {
+                            Toast.makeText(appCtx, "$filename saved to Downloads", Toast.LENGTH_SHORT).show()
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Download failed", e)
-                        (context as? android.app.Activity)?.runOnUiThread {
-                            Toast.makeText(context, "Download failed: ${e.message}", Toast.LENGTH_LONG).show()
+                        activity?.runOnUiThread {
+                            Toast.makeText(appCtx, "Download failed: ${e.message}", Toast.LENGTH_LONG).show()
                         }
+                    } finally {
+                        // Always close the socket, even on exceptions.
+                        try { conn?.disconnect() } catch (_: Exception) {}
                     }
                 }
             }
@@ -184,11 +192,13 @@ fun LiveTab(onPiFound: (String) -> Unit) {
         }
 
         onDispose {
-            connectivityManager.bindProcessToNetwork(null)
-            if (nsdDiscoveryActive) {
-                try { nsdManager?.stopServiceDiscovery(nsdListener) } catch (_: Exception) {}
-            }
+            // Unbind unconditionally — safer than trusting the flag, which
+            // may not yet reflect a concurrent onAvailable callback that
+            // started discovery on a binder thread.
+            try { connectivityManager.bindProcessToNetwork(null) } catch (_: Exception) {}
+            try { nsdManager?.stopServiceDiscovery(nsdListener) } catch (_: Exception) {}
             try { connectivityManager.unregisterNetworkCallback(networkCallback) } catch (_: Exception) {}
+            nsdDiscoveryActive = false
         }
     }
 

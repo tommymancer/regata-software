@@ -172,8 +172,22 @@ class CsvLogger:
         )
 
         self._file.write(row)
-        # Flush every row for crash safety (power loss during sailing)
-        # fsync every 10 rows (5 seconds at 2 Hz) to avoid SD card I/O bottleneck
+        # Flush every row for crash safety (power loss during sailing).
+        # The write + flush push bytes to the kernel; cheap (microseconds).
         self._file.flush()
+        # fsync is the expensive part (10-100ms on SD cards) because it waits
+        # for the kernel to commit to disk. If called from an async context,
+        # the caller should wrap this in asyncio.to_thread; the sync path here
+        # is for tests and non-async callers.
         if self._tick_count % (self._decimation * 10) == 0:
             os.fsync(self._file.fileno())
+
+    async def log_async(self, state: BoatState) -> None:
+        """Async variant: runs the full log() in a worker thread.
+
+        fsync on an SD card can take 10-100ms. From the async pipeline loop,
+        that stalls the event loop and starves CAN frame processing. Offload
+        the whole synchronous write+flush+fsync chain to keep the loop responsive.
+        """
+        import asyncio
+        await asyncio.to_thread(self.log, state)

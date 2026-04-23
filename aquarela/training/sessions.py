@@ -9,6 +9,7 @@ in SQLite.
 """
 
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -62,6 +63,10 @@ class SessionManager:
         self._moving_since: Optional[float] = None
         self._stopped_since: Optional[float] = None
         self._last_nmea_time: Optional[float] = None
+        # Guards the active_session transition points (start/stop).
+        # Prevents the pipeline loop's auto-start and a concurrent HTTP
+        # force_start from both creating a Session row.
+        self._lock = threading.Lock()
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -92,48 +97,49 @@ class SessionManager:
         """
         now = time.monotonic()
 
-        # NMEA guard: no frames for 30s → force stop
-        if self.active_session is not None and self._last_nmea_time is not None:
-            if now - self._last_nmea_time > self.NMEA_TIMEOUT_SECS:
-                self._stop_session()
-                return "stopped"
-
-        bsp_val = bsp if bsp is not None else 0.0
-        sog_val = sog if sog is not None else 0.0
-
-        # Start: either BSP or SOG above threshold
-        is_moving_start = (
-            bsp_val >= self.START_SPEED_THRESHOLD
-            or sog_val >= self.START_SPEED_THRESHOLD
-        )
-        # Stop: both BSP and SOG below threshold
-        is_moving_stop = (
-            bsp_val >= self.STOP_SPEED_THRESHOLD
-            or sog_val >= self.STOP_SPEED_THRESHOLD
-        )
-
-        if self.active_session is None:
-            # Not in session — check for auto-start
-            if is_moving_start:
-                if self._moving_since is None:
-                    self._moving_since = now
-                elif now - self._moving_since >= self.START_DURATION_SECS:
-                    self._start_session()
-                    return "started"
-            else:
-                self._moving_since = None
-        else:
-            # In session — check for auto-stop
-            if is_moving_stop:
-                self._stopped_since = None
-            else:
-                if self._stopped_since is None:
-                    self._stopped_since = now
-                elif now - self._stopped_since >= self.STOP_DURATION_SECS:
+        with self._lock:
+            # NMEA guard: no frames for 30s → force stop
+            if self.active_session is not None and self._last_nmea_time is not None:
+                if now - self._last_nmea_time > self.NMEA_TIMEOUT_SECS:
                     self._stop_session()
                     return "stopped"
 
-        return None
+            bsp_val = bsp if bsp is not None else 0.0
+            sog_val = sog if sog is not None else 0.0
+
+            # Start: either BSP or SOG above threshold
+            is_moving_start = (
+                bsp_val >= self.START_SPEED_THRESHOLD
+                or sog_val >= self.START_SPEED_THRESHOLD
+            )
+            # Stop: both BSP and SOG below threshold
+            is_moving_stop = (
+                bsp_val >= self.STOP_SPEED_THRESHOLD
+                or sog_val >= self.STOP_SPEED_THRESHOLD
+            )
+
+            if self.active_session is None:
+                # Not in session — check for auto-start
+                if is_moving_start:
+                    if self._moving_since is None:
+                        self._moving_since = now
+                    elif now - self._moving_since >= self.START_DURATION_SECS:
+                        self._start_session()
+                        return "started"
+                else:
+                    self._moving_since = None
+            else:
+                # In session — check for auto-stop
+                if is_moving_stop:
+                    self._stopped_since = None
+                else:
+                    if self._stopped_since is None:
+                        self._stopped_since = now
+                    elif now - self._stopped_since >= self.STOP_DURATION_SECS:
+                        self._stop_session()
+                        return "stopped"
+
+            return None
 
     def _start_session(self) -> None:
         """Create a new session in SQLite."""
@@ -168,30 +174,32 @@ class SessionManager:
 
     def force_start(self, session_type: str = "training") -> Session:
         """Manually start a session."""
-        if self.active_session is not None:
-            self._stop_session()
-        conn = self._get_conn()
-        now_iso = datetime.now(timezone.utc).isoformat()
-        cur = conn.execute(
-            "INSERT INTO sessions (start_time, session_type) VALUES (?, ?)",
-            (now_iso, session_type),
-        )
-        conn.commit()
-        self.active_session = Session(
-            id=cur.lastrowid,
-            start_time=now_iso,
-            session_type=session_type,
-        )
-        self._stopped_since = None
-        return self.active_session
+        with self._lock:
+            if self.active_session is not None:
+                self._stop_session()
+            conn = self._get_conn()
+            now_iso = datetime.now(timezone.utc).isoformat()
+            cur = conn.execute(
+                "INSERT INTO sessions (start_time, session_type) VALUES (?, ?)",
+                (now_iso, session_type),
+            )
+            conn.commit()
+            self.active_session = Session(
+                id=cur.lastrowid,
+                start_time=now_iso,
+                session_type=session_type,
+            )
+            self._stopped_since = None
+            return self.active_session
 
     def force_stop(self) -> Optional[Session]:
         """Manually stop the active session."""
-        if self.active_session is None:
-            return None
-        session = self.active_session
-        self._stop_session()
-        return session
+        with self._lock:
+            if self.active_session is None:
+                return None
+            session = self.active_session
+            self._stop_session()
+            return session
 
     def set_csv_file(self, csv_path: str) -> None:
         """Associate a CSV file with the active session."""

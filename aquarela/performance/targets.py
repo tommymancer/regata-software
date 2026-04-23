@@ -50,12 +50,13 @@ def compute_targets(state: BoatState, polar: PolarTable) -> None:
         # Target TWA (signed to match current tack/gybe)
         state.target_twa_deg = math.copysign(target_twa, twa) if twa != 0 else target_twa
 
-        # Target VMG and VMG-PERF%
+        # Target VMG and VMG-PERF%. Convention: compare magnitudes.
+        # Upwind VMG is positive (BSP·cos(TWA) with TWA<90), downwind is
+        # negative (TWA>90); target_vmg from the polar is always magnitude.
+        # We report % of the optimal VMG in absolute terms — direction is
+        # implicit from the TWA sign / tack state.
         state.target_vmg_kt = target_vmg
         if state.vmg_kt is not None and target_vmg > 0:
-            actual_vmg = abs(state.vmg_kt) if is_upwind else -state.vmg_kt
-            # For downwind, VMG is negative (BSP * cos(TWA) where TWA > 90)
-            # We compare absolute values
             state.vmg_perf_pct = (abs(state.vmg_kt) / target_vmg) * 100.0
         else:
             state.vmg_perf_pct = None
