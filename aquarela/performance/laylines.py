@@ -74,15 +74,15 @@ def compute_laylines(state: BoatState, polar: PolarTable) -> Tuple[Optional[floa
         ratio = min(state.current_drift_kt / state.bsp_kt, 0.5)
         current_correction = math.degrees(math.asin(ratio))
 
-    if is_upwind:
-        # Starboard layline: TWD + target_TWA (boat heading right of wind)
-        stbd = (twd + effective_angle + current_correction) % 360
-        # Port layline: TWD - target_TWA (boat heading left of wind)
-        port = (twd - effective_angle - current_correction) % 360
-    else:
-        # Downwind: laylines bracket the dead-downwind direction
-        stbd = (twd + 180 + effective_angle + current_correction) % 360
-        port = (twd + 180 - effective_angle - current_correction) % 360
+    # Layline bearing = boat heading when sailing that layline toward the mark.
+    # Same formula for upwind and downwind: target_TWA is the absolute angle
+    # from bow to wind (≈45° upwind, ≈150° downwind). Convention: TWA is signed
+    # with port negative, so stbd heading = TWD − TWA, port heading = TWD + TWA.
+    #
+    # Port layline: boat on port tack/gybe (wind on port/left side)
+    port = (twd + effective_angle + current_correction) % 360
+    # Starboard layline: boat on stbd tack/gybe (wind on stbd/right side)
+    stbd = (twd - effective_angle - current_correction) % 360
 
     return port, stbd
 

@@ -51,22 +51,26 @@ class TestComputeLaylines:
         assert stbd is None
 
     def test_bearings_bracket_twd_upwind(self, polar):
-        """Upwind laylines should be on either side of TWD."""
+        """Upwind laylines should be on either side of TWD.
+
+        Convention: port layline = port-tack boat heading = TWD + target_TWA
+                    stbd layline = stbd-tack boat heading = TWD − target_TWA
+        """
         s = _make_state(twd_deg=0.0, tws_kt=10.0, twa_deg=-42.0, bsp_kt=5.5)
         port, stbd = compute_laylines(s, polar)
-        # Stbd layline: TWD + angle → clockwise from north
-        assert stbd < 90
-        # Port layline: TWD − angle → counterclockwise → near 360
-        assert port > 270
+        # Port layline: TWD + angle → clockwise from north (port tack heading)
+        assert port < 90
+        # Stbd layline: TWD − angle → counterclockwise → near 360 (stbd tack heading)
+        assert stbd > 270
 
     def test_leeway_widens_laylines(self, polar):
         """Non-zero leeway widens the effective layline angle."""
         s_no = _make_state(twd_deg=0.0, tws_kt=10.0, twa_deg=-42.0, bsp_kt=5.5, leeway_deg=0.0)
         s_yes = _make_state(twd_deg=0.0, tws_kt=10.0, twa_deg=-42.0, bsp_kt=5.5, leeway_deg=5.0)
-        _, stbd_no = compute_laylines(s_no, polar)
-        _, stbd_yes = compute_laylines(s_yes, polar)
-        # Leeway widens the angle → stbd bearing further clockwise from 0
-        assert stbd_yes > stbd_no
+        port_no, _ = compute_laylines(s_no, polar)
+        port_yes, _ = compute_laylines(s_yes, polar)
+        # Leeway widens the angle → port bearing further clockwise from 0
+        assert port_yes > port_no
 
     def test_current_shifts_laylines(self, polar):
         """Current should shift laylines."""
@@ -93,6 +97,41 @@ class TestComputeLaylines:
         port, stbd = compute_laylines(s, polar)
         assert 0 <= port < 360
         assert 0 <= stbd < 360
+
+    def test_port_tack_boat_on_port_layline(self, polar):
+        """Boat on port tack, fetching the upwind mark → dist_to_port_layline ≈ 0.
+
+        Wind from N (TWD=0). Upwind mark to the N of boat. A port-tack boat
+        heads NE (wind on port side); its layline extends from the mark
+        toward the SW. We place the boat ~0.3 NM SW of the mark (on the
+        port layline) and check cross-track distance to port layline is ~0.
+        """
+        s = _make_state(twd_deg=0.0, tws_kt=10.0, twa_deg=-42.0, bsp_kt=5.5)
+        port_brg, stbd_brg = compute_laylines(s, polar)
+
+        # Port tack heading (layline bearing) should be NE-ish: 0° < port < 90°
+        assert 0 < port_brg < 90, f"Port layline should be NE for N wind, got {port_brg}"
+        # Stbd tack heading (layline bearing) should be NW-ish: 270° < stbd < 360°
+        assert 270 < stbd_brg < 360, f"Stbd layline should be NW for N wind, got {stbd_brg}"
+
+        # Place boat on port-tack approach line: SW of mark (opposite of port heading)
+        mark_lat, mark_lon = 46.0, 8.9
+        approach_brg = (port_brg + 180) % 360  # bearing FROM mark toward boat
+        d_nm = 0.3
+        d_rad = d_nm / 3440.065
+        brg_rad = math.radians(approach_brg)
+        boat_lat = mark_lat + math.degrees(d_rad * math.cos(brg_rad))
+        boat_lon = mark_lon + math.degrees(
+            d_rad * math.sin(brg_rad) / math.cos(math.radians(mark_lat))
+        )
+        s.lat = boat_lat
+        s.lon = boat_lon
+
+        dp, ds = compute_layline_distances(s, mark_lat, mark_lon, port_brg, stbd_brg)
+        # Boat is ON the port layline → dp ≈ 0
+        assert dp == pytest.approx(0.0, abs=0.01), f"dist_to_port should be 0, got {dp}"
+        # Boat is NOT on stbd layline → ds > 0
+        assert ds > 0.1, f"dist_to_stbd should be positive, got {ds}"
 
 
 # ── compute_layline_distances ──────────────────────────────────────

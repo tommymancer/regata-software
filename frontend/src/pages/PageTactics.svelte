@@ -43,7 +43,6 @@
   const boatY = H * 0.6;
 
   // Laylines from next mark
-  $: tackAngle = $targetTwa ?? 40;
   $: twdVal = $twd ?? 0;
   $: btwDeg = $btw ?? 0;
   $: dtwNm = $dtw ?? 0;
@@ -54,20 +53,30 @@
   $: markX = boatX + Math.sin(btwDeg * Math.PI / 180) * markDistClamped;
   $: markY = boatY - Math.cos(btwDeg * Math.PI / 180) * markDistClamped;
 
-  // Layline geometry from mark
-  $: portAngle = twdVal + 180 - tackAngle;
-  $: stbdAngle = twdVal + 180 + tackAngle;
-  const layLen = 400;
+  // Laylines come from the backend: `layline_port_deg` / `layline_stbd_deg`
+  // are COMPASS BEARINGS = the heading a boat on that tack sails toward the mark.
+  // The backend applies target_TWA (from polar, interpolated on TWS) + leeway
+  // correction + current correction.
+  //
+  // To draw the layline from the mark extending back toward the approaching
+  // boat, we go in the OPPOSITE direction (+180°).
+  //
+  // Fallback (polar-only, no leeway/current): TWD ± target_TWA.
+  $: tackAngle = $targetTwa ?? 40;
+  $: portBearing = $laylinePort ?? ((twdVal + tackAngle + 360) % 360);
+  $: stbdBearing = $laylineStbd ?? ((twdVal - tackAngle + 360) % 360);
 
+  const layLen = 400;
   function rad(deg) { return deg * Math.PI / 180; }
 
+  // Extend the layline from the mark AWAY from the boat's approach heading.
   $: layPortEnd = {
-    x: markX + Math.sin(rad(portAngle)) * layLen,
-    y: markY - Math.cos(rad(portAngle)) * layLen,
+    x: markX + Math.sin(rad(portBearing + 180)) * layLen,
+    y: markY - Math.cos(rad(portBearing + 180)) * layLen,
   };
   $: layStbdEnd = {
-    x: markX + Math.sin(rad(stbdAngle)) * layLen,
-    y: markY - Math.cos(rad(stbdAngle)) * layLen,
+    x: markX + Math.sin(rad(stbdBearing + 180)) * layLen,
+    y: markY - Math.cos(rad(stbdBearing + 180)) * layLen,
   };
 
   // Format distance
