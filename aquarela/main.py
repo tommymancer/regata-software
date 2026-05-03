@@ -331,15 +331,6 @@ async def _pipeline_loop(source: NmeaSource) -> None:
 
                     compute_true_wind(state)
 
-                    # Publish all calibrated data onto CAN bus
-                    can_writer.update(
-                        twa_water=state.twa_deg,
-                        tws_water=state.tws_kt,
-                        heading_mag=state.heading_mag,
-                        bsp_kt=state.bsp_kt,
-                        depth_m=state.depth_m,
-                    )
-
                     compute_derived(state)
                     damping.apply(state)
 
@@ -348,6 +339,39 @@ async def _pipeline_loop(source: NmeaSource) -> None:
 
                     if _polar is not None:
                         compute_targets(state, _polar)
+
+                    # Publish all calibrated data onto CAN bus.
+                    #
+                    # TWA-actual goes out on PGN 130306 ref=4 (TRUE_WATER) via
+                    # twa_water. The Garmin GNX Wind reads this off the bus
+                    # and shows it on the analog needle and the TWA field
+                    # (verified live on the boat 2026-05-03).
+                    #
+                    # TWA-target (from polar lookup) goes out on PGN 130306
+                    # ref=3 (TRUE_GROUND) via twa_ground. The GNX 20 picks
+                    # it up as the "Ground Wind Direction" data field, so
+                    # the crew reads actual + target side by side with no
+                    # firmware reverse-engineering needed. We send abs() so
+                    # the displayed number stays in 0..180° (the natural
+                    # range for target TWA) instead of wrapping to 318°
+                    # for a port-tack target like -42°.
+                    #
+                    # Real tws is published in both target frames so users
+                    # can safely set the Garmin's wind source to "Aquarela"
+                    # without losing wind speed — we only hijack the angle.
+                    _target_for_can = (
+                        abs(state.target_twa_deg)
+                        if state.target_twa_deg is not None else None
+                    )
+                    can_writer.update(
+                        twa_water=state.twa_deg,
+                        tws_water=state.tws_kt,
+                        twa_ground=_target_for_can,
+                        tws_ground=state.tws_kt,
+                        heading_mag=state.heading_mag,
+                        bsp_kt=state.bsp_kt,
+                        depth_m=state.depth_m,
+                    )
 
                     # Start line geometry + VMC
                     if start_line.state.is_mark_set():

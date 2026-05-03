@@ -140,11 +140,26 @@ class TestBuildNameField:
         assert func == 130
 
     def test_manufacturer_code(self):
-        """Manufacturer code (bits 21-31) must be 2047."""
+        """Manufacturer code (bits 21-31) must be 229 (Garmin).
+
+        We deliberately impersonate Garmin so the GNX displays accept
+        this device as a selectable Wind source. With the previous
+        generic code (2047) the GNX's Data Sources picker filtered us
+        out (only Garmin-classed wind devices appeared in the list).
+        """
         name = build_name_field(unique_number=0)
         value = int.from_bytes(name, "little")
         mfr = (value >> 21) & 0x7FF
-        assert mfr == 2047
+        assert mfr == 229
+
+    def test_device_class_wind_display(self):
+        """Device class (bits 49-55) must be 120, matching the on-bus
+        Garmin mast wind sensors. Required for the GNX to list us in
+        the wind source picker."""
+        name = build_name_field(unique_number=0)
+        value = int.from_bytes(name, "little")
+        cls = (value >> 49) & 0x7F
+        assert cls == 120
 
 
 # ── CanWriter class ───────────────────────────────────────────────────────

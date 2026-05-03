@@ -24,8 +24,11 @@ logger = logging.getLogger("aquarela.can_writer")
 
 _KT_TO_MS = 1.0 / 1.94384
 
-WIND_REF_TRUE_GROUND = 3
-WIND_REF_TRUE_WATER = 4
+WIND_REF_TRUE_NORTH = 0   # true wind, north-referenced
+WIND_REF_MAGNETIC   = 1   # true wind, magnetic-referenced
+WIND_REF_APPARENT   = 2
+WIND_REF_TRUE_GROUND = 3  # true wind, boat (ground) reference
+WIND_REF_TRUE_WATER = 4   # true wind, water reference
 
 
 def encode_pgn_130306(twa_deg: float, tws_kt: float, reference: int) -> bytes:
@@ -127,10 +130,15 @@ def build_name_field(unique_number: Optional[int] = None) -> bytes:
         machine_hash = hashlib.md5(uuid.getnode().to_bytes(6, "big")).digest()
         unique_number = int.from_bytes(machine_hash[:3], "little") & 0x1FFFFF
 
-    manufacturer_code = 2047
+    # Match the Garmin mast wind sensors' NAME shape so the GNX displays
+    # accept this device as a selectable Wind source. With our previous
+    # generic settings (mfr=2047, class=75) the GNX's "Data Sources →
+    # Wind" picker filtered us out — only Garmin-classed wind devices
+    # appeared. On a private boat bus this is harmless impersonation.
+    manufacturer_code = 229   # Garmin
     device_instance = 0
-    device_function = 130
-    device_class = 75
+    device_function = 130     # Wind
+    device_class = 120        # matches the on-bus mast wind sensors
     system_instance = 0
     industry_group = 4
     self_configurable = 1
@@ -372,9 +380,20 @@ class CanWriter:
             can_id = (2 << 26) | (0x1FD02 << 8) | sa
             frames.append((can_id, encode_pgn_130306(twa_water, tws_water, WIND_REF_TRUE_WATER)))
 
-        if twa_ground is not None and tws_ground is not None:
+        if twa_ground is not None:
+            # Hijack PGN 130306 reference=3 (TRUE_GROUND) to surface the
+            # polar's target TWA. The GNX 20 displays it as the "Ground Wind
+            # Direction" data field (verified 2026-05-03). The crew reads
+            # actual TWA + target TWA side-by-side without a chartplotter.
+            #
+            # We tried also publishing on reference=2 (APPARENT) to inject
+            # a second needle on the GNX Wind's analog gauge, but the GNX
+            # Wind always rederives apparent internally from its primary
+            # wind source — our injection is ignored. Real GNX Wind dial
+            # markers need the proprietary PGN 126720 sailing variant.
+            _tws = tws_ground if tws_ground is not None else 0.0
             can_id = (2 << 26) | (0x1FD02 << 8) | sa
-            frames.append((can_id, encode_pgn_130306(twa_ground, tws_ground, WIND_REF_TRUE_GROUND)))
+            frames.append((can_id, encode_pgn_130306(twa_ground, _tws, WIND_REF_TRUE_GROUND)))
 
         # PGN 127250 — Vessel Heading
         if heading_mag is not None:
