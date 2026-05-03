@@ -1258,6 +1258,123 @@ async def system_version():
         return {"sha": "unknown", "message": str(e), "date": ""}
 
 
+# Files / dirs we never overwrite during OTA: data must be preserved across
+# updates, build artifacts and other repos shouldn't be touched.
+_OTA_EXCLUDE = frozenset({
+    ".git", "data", "node_modules", "venv", "__pycache__",
+    "aquarela-android", ".claude",
+})
+
+
+def _ota_sync_and_validate(
+    src_dir: Path,
+    repo: Path,
+    *,
+    validation_cmd: list[str] | None = None,
+) -> tuple[list[dict], bool]:
+    """Sync `src_dir` onto `repo`, validate the result, roll back on failure.
+
+    Robustness pattern: snapshot the live tree first so we can roll back
+    if anything goes wrong. The naive `rmtree+copytree` used previously had
+    no atomicity — a crash mid-copy left the repo in a state where Python
+    files existed but were 0 bytes, breaking aquarela on the next restart
+    with no signal.
+
+    Returns (steps, ok). On failure, the live tree is restored to its
+    pre-sync state.
+    """
+    import shutil
+    import subprocess
+    import sys
+
+    steps: list[dict] = []
+    backup_dir = repo.parent / f"{repo.name}.ota-backup"
+
+    if validation_cmd is None:
+        validation_cmd = [
+            sys.executable, "-c",
+            "import importlib; "
+            "m = importlib.import_module('aquarela.main'); "
+            "assert hasattr(m, 'app'), 'aquarela.main has no `app`'",
+        ]
+
+    def _restore() -> None:
+        for name in backed_up:
+            live = repo / name
+            bak = backup_dir / name
+            if live.exists():
+                if live.is_dir():
+                    shutil.rmtree(live)
+                else:
+                    live.unlink()
+            if bak.is_dir():
+                shutil.copytree(bak, live, symlinks=True)
+            elif bak.exists():
+                shutil.copy2(bak, live)
+
+    # 1. Snapshot whatever the tarball would replace.
+    if backup_dir.exists():
+        shutil.rmtree(backup_dir)
+    backup_dir.mkdir()
+    backed_up: list[str] = []
+    for item in src_dir.iterdir():
+        if item.name in _OTA_EXCLUDE:
+            continue
+        live = repo / item.name
+        if not live.exists():
+            continue
+        bak = backup_dir / item.name
+        if live.is_dir():
+            shutil.copytree(live, bak, symlinks=True)
+        else:
+            shutil.copy2(live, bak)
+        backed_up.append(item.name)
+    steps.append({"step": "backup", "ok": True,
+                   "output": f"Snapshot {len(backed_up)} entry"})
+
+    # 2. Copy from tarball into the live tree. On any error, restore.
+    try:
+        for item in src_dir.iterdir():
+            if item.name in _OTA_EXCLUDE:
+                continue
+            dest = repo / item.name
+            if item.is_dir():
+                if dest.exists():
+                    shutil.rmtree(dest)
+                shutil.copytree(item, dest)
+            else:
+                shutil.copy2(item, dest)
+    except Exception as copy_err:
+        _restore()
+        steps.append({"step": "sync", "ok": False,
+                       "output": f"Copy fallita, ripristinato snapshot: {copy_err}"})
+        shutil.rmtree(backup_dir, ignore_errors=True)
+        return steps, False
+
+    steps.append({"step": "sync", "ok": True, "output": "File aggiornati"})
+
+    # 3. Validate the new tree by importing the entry module in a subprocess
+    # (so a broken import can't poison this process). If it fails — file
+    # ended up 0 bytes, syntax error, missing dep — restore the backup so
+    # the service can keep running on the next restart.
+    validate = subprocess.run(
+        validation_cmd,
+        cwd=str(repo), capture_output=True, text=True, timeout=30,
+    )
+    if validate.returncode != 0:
+        err = (validate.stderr or validate.stdout or "import failed")[-300:]
+        _restore()
+        steps.append({"step": "validate", "ok": False,
+                       "output": f"Import fallito → ROLLBACK eseguito.\n{err}"})
+        shutil.rmtree(backup_dir, ignore_errors=True)
+        return steps, False
+    steps.append({"step": "validate", "ok": True,
+                   "output": "Import aquarela.main OK"})
+
+    shutil.rmtree(backup_dir, ignore_errors=True)
+    return steps, True
+
+
 @app.post("/api/system/update")
 async def system_update(request: Request):
     """Receive tarball from Android app, extract, rebuild, restart.
@@ -1266,6 +1383,7 @@ async def system_update(request: Request):
     so the Pi doesn't need internet access.
     """
     import subprocess
+    import sys
     import tarfile
     import tempfile
     import shutil
@@ -1313,21 +1431,11 @@ async def system_update(request: Request):
             steps.append({"step": "extract", "ok": True,
                            "output": f"Estratto in {src_dir.name}"})
 
-            # 3. Sync files (exclude data, config, sessions, .git)
-            exclude = {".git", "data", "node_modules", "venv", "__pycache__",
-                       "aquarela-android", ".claude"}
-            for item in src_dir.iterdir():
-                if item.name in exclude:
-                    continue
-                dest = repo / item.name
-                if item.is_dir():
-                    if dest.exists():
-                        shutil.rmtree(dest)
-                    shutil.copytree(item, dest)
-                else:
-                    shutil.copy2(item, dest)
-
-            steps.append({"step": "sync", "ok": True, "output": "File aggiornati"})
+            # 3. Sync + validate + rollback. See _ota_sync_and_validate.
+            sync_steps, sync_ok = _ota_sync_and_validate(src_dir, repo)
+            steps.extend(sync_steps)
+            if not sync_ok:
+                return {"success": False, "steps": steps}
 
             # 3b. Save version info from tarball folder name
             # GitHub tarballs: "user-repo-sha" → extract SHA
