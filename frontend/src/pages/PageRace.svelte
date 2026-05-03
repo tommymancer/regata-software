@@ -15,6 +15,7 @@
   import { history } from "../stores/history.js";
   import { computeWindShift } from "../lib/wind_shift.js";
   import { fmtSpeed } from "../lib/formatting.js";
+  import SailSelector from "../components/SailSelector.svelte";
 
   // Connection state
   $: isConnected = $connectionStatus === "connected";
@@ -134,7 +135,8 @@
   <!-- Header strip -->
   <div class="header-strip">
     <span>BOLINA &middot; MURA {isPort ? "DRITTA" : "SINISTRA"}</span>
-    <span>{$nextMark ? `PROSSIMA: ${$nextMark}` : ""}</span>
+    {#if $nextMark}<span class="hs-mark">PROSSIMA: {$nextMark}</span>{/if}
+    <SailSelector />
   </div>
 
   <!-- HERO: TWA gauge -->
@@ -464,12 +466,20 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 8px;
     font-family: var(--font-mono);
     font-size: 10px;
     letter-spacing: 1.2px;
     color: var(--text-dim);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+  }
+  .hs-mark {
+    flex: 1;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* ── TWA Hero ────────────────────────────── */

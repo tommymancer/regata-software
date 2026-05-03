@@ -129,13 +129,20 @@ fun LiveTab(onPiFound: (String) -> Unit) {
     }
 
     DisposableEffect(Unit) {
-        val suggestion = WifiNetworkSuggestion.Builder()
-            .setSsid(AQUARELA_SSID)
-            .setWpa2Passphrase(AQUARELA_PSK)
-            .setIsAppInteractionRequired(false)
-            .build()
+        // Clean up any WiFi network suggestions from previous app versions.
+        // We used to call addNetworkSuggestions(...) here, but Android shows
+        // suggested networks as a SEPARATE row from the user's saved network
+        // ("Aquarela" + "Aquarela — connect through Aquarela (app)"), which
+        // confused the picker and made the phone try the wrong one. The
+        // user reaches the Pi just fine via the regular saved network.
         val wifiManager = context.getSystemService(WifiManager::class.java)
-        wifiManager.addNetworkSuggestions(listOf(suggestion))
+        try {
+            val suggestion = WifiNetworkSuggestion.Builder()
+                .setSsid(AQUARELA_SSID)
+                .setWpa2Passphrase(AQUARELA_PSK)
+                .build()
+            wifiManager.removeNetworkSuggestions(listOf(suggestion))
+        } catch (_: Exception) {}
 
         val nsdListener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(serviceType: String) {}
