@@ -7,6 +7,7 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiNetworkSpecifier
 import android.net.wifi.WifiNetworkSuggestion
 import android.net.wifi.WifiManager
 import android.os.Environment
@@ -129,19 +130,18 @@ fun LiveTab(onPiFound: (String) -> Unit) {
     }
 
     DisposableEffect(Unit) {
-        // Clean up any WiFi network suggestions from previous app versions.
-        // We used to call addNetworkSuggestions(...) here, but Android shows
-        // suggested networks as a SEPARATE row from the user's saved network
-        // ("Aquarela" + "Aquarela — connect through Aquarela (app)"), which
-        // confused the picker and made the phone try the wrong one. The
-        // user reaches the Pi just fine via the regular saved network.
-        val wifiManager = context.getSystemService(WifiManager::class.java)
+        // Best-effort cleanup of legacy WiFi suggestions from older app
+        // installs. addNetworkSuggestions used to live here but it created
+        // a duplicate "Aquarela — via app" row in the WiFi picker that
+        // confused auto-join. Removing those suggestions keeps the system
+        // WiFi list clean.
         try {
-            val suggestion = WifiNetworkSuggestion.Builder()
+            val wifiManager = context.getSystemService(WifiManager::class.java)
+            val legacy = WifiNetworkSuggestion.Builder()
                 .setSsid(AQUARELA_SSID)
                 .setWpa2Passphrase(AQUARELA_PSK)
                 .build()
-            wifiManager.removeNetworkSuggestions(listOf(suggestion))
+            wifiManager.removeNetworkSuggestions(listOf(legacy))
         } catch (_: Exception) {}
 
         val nsdListener = object : NsdManager.DiscoveryListener {
@@ -180,11 +180,35 @@ fun LiveTab(onPiFound: (String) -> Unit) {
                 resolvedUrl = null
                 connectivityManager.bindProcessToNetwork(null)
             }
+            override fun onUnavailable() {
+                // User declined the system dialog or no Aquarela network
+                // visible. Fall through to the direct-IP probe thread —
+                // useful when the Pi is reached over a wired LAN at home
+                // instead of its own hotspot.
+                Log.w(TAG, "WifiNetworkSpecifier unavailable — fallback to direct probe")
+            }
         }
 
+        // App-controlled WiFi connection: ask Android to join the Aquarela
+        // hotspot specifically for this app's traffic. The first time we
+        // request, the system shows a one-shot dialog "App wants to connect
+        // to Aquarela?" — after the user approves once, subsequent launches
+        // reconnect automatically without prompting again.
+        //
+        // Why this instead of addNetworkSuggestions:
+        // - No duplicate row in the system WiFi picker
+        // - Other apps keep using whatever WiFi the user is on (home, hotspot)
+        // - Connection is released when this composable disposes (back to
+        //   the user's primary WiFi automatically)
+        // - Works without any saved network on the phone
+        val specifier = WifiNetworkSpecifier.Builder()
+            .setSsid(AQUARELA_SSID)
+            .setWpa2Passphrase(AQUARELA_PSK)
+            .build()
         val request = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .setNetworkSpecifier(specifier)
             .build()
         connectivityManager.requestNetwork(request, networkCallback)
 
