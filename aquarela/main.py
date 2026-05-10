@@ -143,16 +143,38 @@ except FileNotFoundError:
 polar_manager: PolarManager = PolarManager(base_polar=_base_polar)
 polar_manager.active_sail_type = config.sail_config_key()
 
-# Convenience alias — pipeline code uses this
-polar: PolarTable | None = polar_manager.active_polar
-
 # Polar learning: one PolarLearner per sail type
 polar_learners: dict[str, PolarLearner] = {
     key: PolarLearner(base_polar=_base_polar, hz=config.sample_rate_hz, sail_type=key)
     for key in SAIL_CONFIGS
 }
 
-# Convenience alias for the active learner (used by API)
+# Rehydrate learned polars from disk at boot.
+#
+# Without this, after every Pi restart the active polar reverts to the
+# conservative base table — even if previous sessions had built up a much
+# more accurate learned polar. The crew would see overly easy "targets"
+# until the next auto-stop rebuilt the learned table mid-day. By rebuilding
+# from polar_samples here at startup, the targets shown from the first
+# sailing minute are based on the actual boat's measured performance.
+for _sail_key in SAIL_CONFIGS:
+    try:
+        _learned = polar_learners[_sail_key].rebuild()
+        if _learned is not None:
+            polar_manager.set_polar(_sail_key, _learned)
+            _stats = polar_learners[_sail_key].get_stats()
+            logger.info(
+                "Loaded learned polar for %s (%d bins ready, %d samples)",
+                _sail_key,
+                _stats.get("bins_ready", 0),
+                _stats.get("total_samples", 0),
+            )
+    except Exception:
+        logger.exception("Failed to load learned polar for %s — using base", _sail_key)
+
+# Convenience aliases — pipeline + API use these. Set AFTER rehydration so
+# `polar` reflects the learned table (not just base) from boot.
+polar: PolarTable | None = polar_manager.active_polar
 polar_learner: PolarLearner = polar_learners[config.sail_config_key()]
 
 # CAN writer — sends corrected true wind as PGN 130306
